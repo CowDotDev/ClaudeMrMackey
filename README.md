@@ -5,10 +5,12 @@ Claude triages them for completeness, a human approves, a Claude coding agent im
 change and opens a PR, an AI review runs as a first gate, and a human merges — which
 auto-deploys the bot with the new feature.
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full design and
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full design,
 [`docs/FEATURE_REQUEST_LIFECYCLE.md`](docs/FEATURE_REQUEST_LIFECYCLE.md) for the request state
-machine. See [`CLAUDE.md`](CLAUDE.md) for conventions followed by both humans and the
-automated dev pipeline.
+machine, and [`docs/PROGRESS.md`](docs/PROGRESS.md) for what's built, what's next, and known
+gaps — read that one first if you're picking this up in a new session. See
+[`CLAUDE.md`](CLAUDE.md) for conventions followed by both humans and the automated dev
+pipeline.
 
 ## Requirements
 
@@ -46,7 +48,4 @@ feature request. The bot only reacts to threads under that channel.
 
 ## Status
 
-Basic bot connectivity, the Postgres/Prisma data model, and the feature-request triage loop
-(Claude checks completeness of a forum thread, asks clarifying questions, and detects the
-approver's `Approved` comment) are in place. Actually kicking off development via GitHub
-Actions and reporting status back to Discord are still in progress.
+See [`docs/PROGRESS.md`](docs/PROGRESS.md) for the current build status and next steps.

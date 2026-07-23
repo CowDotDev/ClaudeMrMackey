@@ -1,5 +1,6 @@
 import { config } from './config.js';
 import { createDiscordClient, login } from './discord/client.js';
+import { registerFeatureRequestHandlers } from './discord/featureRequests.js';
 import { createServer, startServer } from './server.js';
 
 async function main(): Promise<void> {
@@ -8,6 +9,7 @@ async function main(): Promise<void> {
   console.log(`Health check listening on port ${config.port}`);
 
   const client = createDiscordClient();
+  registerFeatureRequestHandlers(client);
   await login(client);
 }
 

@@ -22,10 +22,14 @@ automated dev pipeline.
 ```bash
 npm install                # also runs `prisma generate` via postinstall
 docker compose up -d       # starts local Postgres
-cp .env.example .env       # fill in DISCORD_BOT_TOKEN; DATABASE_URL default matches docker-compose
+cp .env.example .env       # fill in DISCORD_BOT_TOKEN, ANTHROPIC_API_KEY, FEATURE_REQUEST_CHANNEL_ID,
+                            # and APPROVER_DISCORD_USER_ID; DATABASE_URL default matches docker-compose
 npm run db:migrate         # applies prisma/migrations to your local Postgres
 npm run dev
 ```
+
+`FEATURE_REQUEST_CHANNEL_ID` must be a **Forum Channel** on your test server - one thread per
+feature request. The bot only reacts to threads under that channel.
 
 ## Scripts
 
@@ -42,6 +46,7 @@ npm run dev
 
 ## Status
 
-Basic bot connectivity (discord.js v14 client + Fastify health check) and the Postgres/Prisma
-data model (`FeatureRequest` / `FeatureRequestEvent`) are in place. The triage/approval/
-dev-automation pipeline described in the architecture doc is still in progress.
+Basic bot connectivity, the Postgres/Prisma data model, and the feature-request triage loop
+(Claude checks completeness of a forum thread, asks clarifying questions, and detects the
+approver's `Approved` comment) are in place. Actually kicking off development via GitHub
+Actions and reporting status back to Discord are still in progress.

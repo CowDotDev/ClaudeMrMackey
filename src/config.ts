@@ -12,4 +12,7 @@ export const config = {
   discordToken: requireEnv('DISCORD_BOT_TOKEN'),
   port: Number(process.env.PORT ?? 3000),
   databaseUrl: requireEnv('DATABASE_URL'),
+  anthropicApiKey: requireEnv('ANTHROPIC_API_KEY'),
+  featureRequestChannelId: requireEnv('FEATURE_REQUEST_CHANNEL_ID'),
+  approverDiscordUserId: requireEnv('APPROVER_DISCORD_USER_ID'),
 };

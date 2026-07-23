@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mrmackey
+      POSTGRES_PASSWORD: mrmackey
+      POSTGRES_DB: mrmackey
+    ports:
+      - '5432:5432'
+    volumes:
+      - mrmackey-postgres-data:/var/lib/postgresql/data
+
+volumes:
+  mrmackey-postgres-data:

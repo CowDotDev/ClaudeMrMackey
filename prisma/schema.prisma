@@ -1,0 +1,49 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum FeatureRequestStatus {
+  gathering_info
+  pending_approval
+  approved
+  dev_in_progress
+  pr_open
+  merged
+  deployed
+  rejected
+}
+
+enum FeatureRequestEventAuthor {
+  op
+  bot
+}
+
+model FeatureRequest {
+  id                String               @id @default(cuid())
+  discordThreadId   String               @unique
+  guildId           String
+  opUserId          String
+  status            FeatureRequestStatus @default(gathering_info)
+  summary           String?
+  githubPrNumber    Int?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  events            FeatureRequestEvent[]
+}
+
+// Only OP and bot messages are ever written here - see docs/FEATURE_REQUEST_LIFECYCLE.md.
+model FeatureRequestEvent {
+  id               String                    @id @default(cuid())
+  featureRequestId String
+  featureRequest   FeatureRequest            @relation(fields: [featureRequestId], references: [id], onDelete: Cascade)
+  author           FeatureRequestEventAuthor
+  content          String
+  createdAt        DateTime                  @default(now())
+
+  @@index([featureRequestId])
+}

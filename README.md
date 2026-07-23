@@ -15,29 +15,33 @@ automated dev pipeline.
 - Node.js 24+
 - A Discord application/bot token (use a **separate test application** and a private test
   server for local development — never point local dev at the production bot/server)
-- Docker (for local Postgres, once the data layer lands)
+- Docker (for local Postgres)
 
 ## Setup
 
 ```bash
-npm install
-cp .env.example .env   # fill in DISCORD_BOT_TOKEN at minimum
+npm install                # also runs `prisma generate` via postinstall
+docker compose up -d       # starts local Postgres
+cp .env.example .env       # fill in DISCORD_BOT_TOKEN; DATABASE_URL default matches docker-compose
+npm run db:migrate         # applies prisma/migrations to your local Postgres
 npm run dev
 ```
 
 ## Scripts
 
-| Command                                   | Purpose                                           |
-| ----------------------------------------- | ------------------------------------------------- |
-| `npm run dev`                             | Run the bot locally with hot reload (`tsx watch`) |
-| `npm run build` / `npm start`             | Compile and run the production build              |
-| `npm run lint` / `npm run lint:fix`       | ESLint                                            |
-| `npm run format` / `npm run format:check` | Prettier                                          |
-| `npm run typecheck`                       | `tsc --noEmit`                                    |
-| `npm test` / `npm run test:watch`         | Vitest                                            |
+| Command                                   | Purpose                                                |
+| ----------------------------------------- | ------------------------------------------------------ |
+| `npm run dev`                             | Run the bot locally with hot reload (`tsx watch`)      |
+| `npm run build` / `npm start`             | Compile and run the production build                   |
+| `npm run lint` / `npm run lint:fix`       | ESLint                                                 |
+| `npm run format` / `npm run format:check` | Prettier                                               |
+| `npm run typecheck`                       | `tsc --noEmit`                                         |
+| `npm test` / `npm run test:watch`         | Vitest                                                 |
+| `npm run db:migrate`                      | Create/apply a Prisma migration against `DATABASE_URL` |
+| `npm run db:studio`                       | Open Prisma Studio to inspect local data               |
 
 ## Status
 
-Currently at the "basic bot connectivity" milestone (discord.js v14 client + Fastify health
-check). The feature-request triage/approval/dev-automation pipeline described in the
-architecture doc is in progress.
+Basic bot connectivity (discord.js v14 client + Fastify health check) and the Postgres/Prisma
+data model (`FeatureRequest` / `FeatureRequestEvent`) are in place. The triage/approval/
+dev-automation pipeline described in the architecture doc is still in progress.

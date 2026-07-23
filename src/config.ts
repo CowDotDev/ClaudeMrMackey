@@ -11,4 +11,5 @@ function requireEnv(name: string): string {
 export const config = {
   discordToken: requireEnv('DISCORD_BOT_TOKEN'),
   port: Number(process.env.PORT ?? 3000),
+  databaseUrl: requireEnv('DATABASE_URL'),
 };

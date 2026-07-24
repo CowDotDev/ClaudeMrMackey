@@ -1,6 +1,7 @@
 import { config } from '../config.js';
 import { prisma } from '../db/client.js';
 import type { TriageMessage, TriageVerdict } from '../ai/triage.js';
+import type { DispatchFn } from '../github/dispatch.js';
 
 export type TriageFn = (messages: TriageMessage[]) => Promise<TriageVerdict>;
 
@@ -18,11 +19,12 @@ export type ServiceAction = { type: 'reply'; content: string } | { type: 'none' 
 export async function handleFeatureRequestMessage(
   message: IncomingMessage,
   triage: TriageFn,
+  dispatch: DispatchFn,
 ): Promise<ServiceAction> {
   if (message.isStarterMessage) {
     return createFeatureRequest(message, triage);
   }
-  return handleFollowUp(message, triage);
+  return handleFollowUp(message, triage, dispatch);
 }
 
 async function createFeatureRequest(
@@ -43,7 +45,11 @@ async function createFeatureRequest(
   return runTriageAndRespond(request.id, [{ author: 'op', content: message.content }], triage);
 }
 
-async function handleFollowUp(message: IncomingMessage, triage: TriageFn): Promise<ServiceAction> {
+async function handleFollowUp(
+  message: IncomingMessage,
+  triage: TriageFn,
+  dispatch: DispatchFn,
+): Promise<ServiceAction> {
   const request = await prisma.featureRequest.findUnique({
     where: { discordThreadId: message.discordThreadId },
   });
@@ -69,6 +75,12 @@ async function handleFollowUp(message: IncomingMessage, triage: TriageFn): Promi
   if (request.status === 'pending_approval') {
     if (message.authorId !== config.approverDiscordUserId) return { type: 'none' };
     if (!/\bapproved\b/i.test(message.content)) return { type: 'none' };
+
+    await dispatch({
+      featureRequestId: request.id,
+      discordThreadId: request.discordThreadId,
+      summary: request.summary ?? '',
+    });
 
     await prisma.featureRequest.update({
       where: { id: request.id },

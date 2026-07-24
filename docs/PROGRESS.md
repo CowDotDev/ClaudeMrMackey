@@ -19,22 +19,26 @@ and you should have everything needed to continue without re-deriving context.
   (the thin Discord adapter). Handles `gathering_info → pending_approval → approved`.
   **Not yet verified against a real Discord Forum Channel/thread** — only unit/integration
   tested. Do that live check before trusting the loop end-to-end.
+- **PR #5 (branch `feature/github-dispatch`, not yet opened)** — wires the actual GitHub
+  `repository_dispatch` call: `src/github/dispatch.ts` (`dispatchFeatureRequest`, Octokit
+  `repos.createDispatchEvent`, injectable-client pattern matching `triage.ts`), called from the
+  approval branch of `handleFollowUp()` in `src/featureRequests/service.ts` _before_ the DB
+  status flips to `approved` (so a failed dispatch leaves the request `pending_approval` and
+  the approver can just re-comment `Approved` to retry). `GITHUB_TOKEN` / `GITHUB_REPO` are now
+  required config in `src/config.ts`. The dispatch payload is
+  `{ featureRequestId, discordThreadId, summary }` — `featureRequestId` is the correlation ID
+  the future status-webhook (step 3 below) should use to find its way back to the right thread.
+  **Only unit tested (mocked Octokit client)** — no real GitHub App/PAT with `repository_dispatch`
+  permission has fired this against the actual repo yet, and there's no listener for the event
+  until `feature-dev.yml` (step 2 below) exists, so nothing will visibly happen when it fires.
 
-Local main is in sync with all three merges. `npm run build/lint/format:check/typecheck/test`
-all pass as of the last commit on `main`.
+Local main is in sync with PRs #1-#3. `npm run build/lint/format:check/typecheck/test`
+all pass as of the last commit on `main`; the same gates pass on `feature/github-dispatch`.
 
 ## Next up (in order)
 
-1. **Wire the actual GitHub `repository_dispatch` call (rest of the original task 6).**
-   `service.ts` already flips a request to `approved` and posts an acknowledgement
-   ("...queued for development...") when the configured approver comments `Approved` — but
-   nothing calls GitHub yet, so that message is currently aspirational. Add `src/github/dispatch.ts`
-   (Octokit `repos.createDispatchEvent`), call it from the approval branch in
-   `handleFollowUp()` in `src/featureRequests/service.ts`, and add `githubToken` /
-   `githubRepo` to `src/config.ts` (env vars `GITHUB_TOKEN` / `GITHUB_REPO` are already in
-   `.env.example` and the user's local `.env`, just not read by `config.ts` yet). Consider
-   storing the dispatch correlation ID (e.g. the `FeatureRequest.id`) in the payload so the
-   triggered workflow can report back to the right thread later.
+1. **Open the PR for `feature/github-dispatch`** (this session's work, described above) and get
+   it merged.
 2. **GitHub Actions: `feature-dev.yml` + `pr-ai-review.yml`.** `feature-dev.yml` triggers on
    `repository_dispatch`, runs `anthropics/claude-code-action` headless against the request
    summary, opens a PR (branch + PR only — never `main`). `pr-ai-review.yml` runs an AI review
@@ -48,7 +52,8 @@ all pass as of the last commit on `main`.
 3. **Status webhook loop back into Discord (original task 8).** Add a POST route to the
    existing Fastify instance in `src/server.ts` that GitHub Actions / Railway can call to
    report PR-opened / merged / deployed events, and have it post back into the originating
-   Discord thread (look up by `FeatureRequest.githubPrNumber` or the correlation ID from step 1).
+   Discord thread (look up by `FeatureRequest.githubPrNumber` or the `featureRequestId`
+   correlation ID already included in the dispatch payload — see PR #5 above).
 
 ## Known gaps / things to verify before going further
 

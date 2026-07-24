@@ -73,6 +73,20 @@ jobs:
           git checkout -b "$BRANCH_NAME"
           echo "branch_name=$BRANCH_NAME" >> "$GITHUB_OUTPUT"
 
+      # Reports status to POST /webhooks/status on the running bot - see src/server.ts and
+      # docs/FEATURE_REQUEST_LIFECYCLE.md. Skipped (not failed) until vars.BOT_PUBLIC_URL is
+      # set, since there's no publicly reachable bot instance to call yet. This step never runs
+      # curl with content from the untrusted feature-request summary - only Claude's own
+      # git/npm/gh pr create tools touch that, kept deliberately separate from this secret.
+      - name: Report dev_in_progress status
+        if: vars.BOT_PUBLIC_URL != ''
+        continue-on-error: true
+        run: |
+          curl -sf -X POST "${{ vars.BOT_PUBLIC_URL }}/webhooks/status" \
+            -H "Authorization: Bearer ${{ secrets.STATUS_WEBHOOK_SECRET }}" \
+            -H "Content-Type: application/json" \
+            -d '{"featureRequestId": "${{ github.event.client_payload.featureRequestId }}", "status": "dev_in_progress"}'
+
       - name: Implement the approved feature request
         uses: anthropics/claude-code-action@v1
         with:
@@ -109,3 +123,20 @@ jobs:
                ${{ github.event.client_payload.discordThreadId }}.
           claude_args: |
             --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,Bash(git:*),Bash(npm:*),Bash(npx:*),Bash(gh pr create:*)"
+
+      - name: Look up the opened PR
+        id: pr
+        if: vars.BOT_PUBLIC_URL != ''
+        continue-on-error: true
+        run: |
+          PR_NUMBER=$(gh pr list --head "${{ steps.branch.outputs.branch_name }}" --json number --jq '.[0].number // empty')
+          echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+
+      - name: Report pr_open status
+        if: vars.BOT_PUBLIC_URL != '' && steps.pr.outputs.number != ''
+        continue-on-error: true
+        run: |
+          curl -sf -X POST "${{ vars.BOT_PUBLIC_URL }}/webhooks/status" \
+            -H "Authorization: Bearer ${{ secrets.STATUS_WEBHOOK_SECRET }}" \
+            -H "Content-Type: application/json" \
+            -d '{"featureRequestId": "${{ github.event.client_payload.featureRequestId }}", "status": "pr_open", "prNumber": ${{ steps.pr.outputs.number }}}'

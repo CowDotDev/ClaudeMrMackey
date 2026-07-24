@@ -9,6 +9,7 @@ datasource db {
 
 enum FeatureRequestStatus {
   gathering_info
+  confirming_summary
   pending_approval
   approved
   dev_in_progress

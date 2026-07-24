@@ -129,25 +129,52 @@ and you should have everything needed to continue without re-deriving context.
   **`deployed` reporting deliberately left out** — checked Railway's webhook docs first: the
   payload has no `featureRequestId`, fires project-wide rather than per-feature-request, and
   would need a new _inbound_ authenticated endpoint plus commit-to-PR correlation via the
-  GitHub API (or a "mark every currently-`merged` request `deployed` on any successful deploy"
-  heuristic), on top of Railway dashboard configuration this session can't do. Scoped as
-  separate follow-up work, not guessed at here.
+  GitHub API, on top of Railway dashboard configuration this session can't do.
+  **Explicitly out of scope for now** (user's instruction, not just deferred) — see PR #17
+  below, which also drops it from "Next up" entirely. The `deployed` enum value stays in the
+  Prisma schema (harmless, unreachable without an emitter) but isn't planned work anymore.
+- **PR #17 (branch `feature/confirmation-loop`, not yet opened)** — reworks the triage flow to
+  add an explicit confirmation step, and lets the approver request changes instead of only
+  approving:
+  - New `confirming_summary` status (Prisma migration
+    `20260724023548_add_confirming_summary_status`), sitting between `gathering_info` and
+    `pending_approval`. Once Claude judges a request ready, the OP is now asked "Does this look
+    right, or is there anything you'd like to add or change?" instead of the bot immediately
+    pinging the approver.
+  - `confirmFeatureRequestSummary()` in `src/ai/triage.ts` — a second Claude-backed structured
+    call (`{confirmed, updatedSummary}`), sibling to `triageFeatureRequest()`. Given the
+    current summary and a reply, it decides whether the reply confirms the summary as-is or
+    requests a change, and if so, produces a revised summary.
+  - In `confirming_summary`, only the OP's replies count (same rule as `gathering_info`). Each
+    reply runs through `confirmFeatureRequestSummary()`: confirmed → moves to
+    `pending_approval` and pings the approver (the original message); not confirmed → summary
+    updated, stays in `confirming_summary`, asks again. This loops until the OP explicitly
+    confirms.
+  - In `pending_approval`, a message from the approver containing "approved" still triggers
+    `dispatchFeatureRequest()` exactly as before. Any other approver message is now treated as
+    a change request instead of being silently ignored: it runs through the same
+    `confirmFeatureRequestSummary()` call, updates the summary, and moves the request back to
+    `confirming_summary` so the OP can review and reconfirm before the approver can approve it
+    again.
+  - `handleFeatureRequestMessage()`'s signature grew a `confirm: ConfirmFn` parameter (between
+    `triage` and `dispatch`), matching the existing `TriageFn`/`DispatchFn` injectable-function
+    pattern.
 
 Local main is in sync with PRs #1-#3, #5, #6, and #9-#16. `npm run build/lint/format:check/typecheck/test`
 all pass as of the last commit on `main`.
 
 ## Next up (in order)
 
-1. **Design and wire `deployed` reporting.** See the PR #16 entry above for what it needs: an
-   inbound endpoint for Railway's deploy webhook, some way to map a deployed commit back to a
-   `FeatureRequest` (or the simpler "mark all `merged` → `deployed` on any successful deploy"
-   heuristic), and Railway dashboard configuration (Settings → Webhooks) pointing at it.
-2. **Verify the `gathering_info` clarifying-question loop live** — every live run so far
-   (`/roll`, this session) went straight to `pending_approval` from an already-complete
-   request. The triage loop's back-and-forth (Claude asks a follow-up, OP replies, re-triages)
-   has only been unit/integration tested, never exercised against a real Discord thread.
-3. **Decide on `pr-ai-review.yml`** — still manually disabled at the user's request (see
+1. **Verify the confirmation loop and clarifying-question loop live** — every live run so far
+   (`/roll`, an earlier session) went straight from an already-complete request to approval, so
+   neither the `gathering_info` clarifying-question back-and-forth nor the new
+   `confirming_summary` confirm/revise loop has been exercised against a real Discord thread
+   yet. Also worth testing an approver change-request live once PR #17 is merged.
+2. **Decide on `pr-ai-review.yml`** — still manually disabled at the user's request (see
    below). Re-enable with `gh workflow enable "PR AI Review"` whenever it's wanted.
+
+`deployed` status reporting is explicitly out of scope for now (see the PR #17 entry above) —
+not on this list.
 
 ## Known gaps / things to verify before going further
 
@@ -156,10 +183,10 @@ all pass as of the last commit on `main`.
   running both at once double-processes every message in the test server.
 - `pr-ai-review.yml` is still manually disabled (`gh workflow disable`, user's request from
   earlier in this project) — `feature-dev.yml` and `ci.yml` are unaffected.
-- `deployed` status reporting doesn't exist yet — see "Next up" step 1. `merged` reporting
-  exists (PR #16) but hasn't been exercised live yet — the next `feature-request/*` PR that
-  merges will be the first real test.
-- The clarifying-question half of the triage loop is unverified live — see "Next up" step 2.
+- `merged` reporting (PR #16) hasn't been exercised live yet — the next `feature-request/*` PR
+  that merges will be the first real test.
+- The confirmation loop and the clarifying-question loop are both unverified live — see "Next
+  up" step 1.
 - Local dev requires Docker Desktop running (`docker compose up -d`) before `npm run dev`
   will find a database.
 

@@ -3,8 +3,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { config } from '../config.js';
 import { prisma } from '../db/client.js';
 import { applyStatusUpdate, handleFeatureRequestMessage } from './service.js';
-import type { TriageVerdict } from '../ai/triage.js';
+import type { ConfirmationVerdict, TriageVerdict } from '../ai/triage.js';
 import type { DispatchFn } from '../github/dispatch.js';
+import type { ConfirmFn } from './service.js';
 
 const threadId = `test-thread-${crypto.randomUUID()}`;
 const opUserId = 'op-user-1';
@@ -14,6 +15,11 @@ function triageReturning(verdict: TriageVerdict) {
   return async () => verdict;
 }
 
+function confirmReturning(verdict: ConfirmationVerdict): ConfirmFn {
+  return async () => verdict;
+}
+
+const noopConfirm: ConfirmFn = confirmReturning({ confirmed: true, updatedSummary: 'unused' });
 const noopDispatch: DispatchFn = async () => {};
 
 afterEach(async () => {
@@ -31,6 +37,7 @@ describe('handleFeatureRequestMessage', () => {
         isStarterMessage: true,
       },
       triageReturning({ ready: false, summary: null, clarifyingQuestion: 'Which dice notation?' }),
+      noopConfirm,
       noopDispatch,
     );
 
@@ -53,6 +60,7 @@ describe('handleFeatureRequestMessage', () => {
         isStarterMessage: true,
       },
       triageReturning({ ready: false, summary: null, clarifyingQuestion: 'Which dice notation?' }),
+      noopConfirm,
       noopDispatch,
     );
 
@@ -65,6 +73,7 @@ describe('handleFeatureRequestMessage', () => {
         isStarterMessage: false,
       },
       triageReturning({ ready: true, summary: 'should not be reached', clarifyingQuestion: null }),
+      noopConfirm,
       noopDispatch,
     );
 
@@ -76,7 +85,7 @@ describe('handleFeatureRequestMessage', () => {
     expect(request.status).toBe('gathering_info');
   });
 
-  it('moves to pending_approval once the OP provides enough detail', async () => {
+  it('moves to confirming_summary once the OP provides enough detail', async () => {
     await handleFeatureRequestMessage(
       {
         discordThreadId: threadId,
@@ -86,6 +95,7 @@ describe('handleFeatureRequestMessage', () => {
         isStarterMessage: true,
       },
       triageReturning({ ready: false, summary: null, clarifyingQuestion: 'Which dice notation?' }),
+      noopConfirm,
       noopDispatch,
     );
 
@@ -98,19 +108,20 @@ describe('handleFeatureRequestMessage', () => {
         isStarterMessage: false,
       },
       triageReturning({ ready: true, summary: 'Add a /roll command', clarifyingQuestion: null }),
+      noopConfirm,
       noopDispatch,
     );
 
     expect(action.type).toBe('reply');
     if (action.type === 'reply') {
       expect(action.content).toContain('Add a /roll command');
-      expect(action.content).toContain(config.approverDiscordUserId);
+      expect(action.content).toContain('Does this look right');
     }
 
     const request = await prisma.featureRequest.findUniqueOrThrow({
       where: { discordThreadId: threadId },
     });
-    expect(request.status).toBe('pending_approval');
+    expect(request.status).toBe('confirming_summary');
     expect(request.summary).toBe('Add a /roll command');
   });
 
@@ -139,6 +150,7 @@ describe('handleFeatureRequestMessage', () => {
         isStarterMessage: false,
       },
       triageReturning({ ready: true, summary: 'unused', clarifyingQuestion: null }),
+      noopConfirm,
       dispatch,
     );
 
@@ -182,6 +194,7 @@ describe('handleFeatureRequestMessage', () => {
           isStarterMessage: false,
         },
         triageReturning({ ready: true, summary: 'unused', clarifyingQuestion: null }),
+        noopConfirm,
         failingDispatch,
       ),
     ).rejects.toThrow('GitHub API unavailable');
@@ -212,6 +225,7 @@ describe('handleFeatureRequestMessage', () => {
         isStarterMessage: false,
       },
       triageReturning({ ready: true, summary: 'unused', clarifyingQuestion: null }),
+      noopConfirm,
       noopDispatch,
     );
 
@@ -221,6 +235,154 @@ describe('handleFeatureRequestMessage', () => {
       where: { discordThreadId: threadId },
     });
     expect(request.status).toBe('pending_approval');
+  });
+
+  it('routes a non-"Approved" approver message back to confirming_summary as a change request', async () => {
+    await prisma.featureRequest.create({
+      data: {
+        discordThreadId: threadId,
+        guildId,
+        opUserId,
+        status: 'pending_approval',
+        summary: 'Add a /roll command',
+      },
+    });
+
+    const action = await handleFeatureRequestMessage(
+      {
+        discordThreadId: threadId,
+        guildId,
+        authorId: config.approverDiscordUserId,
+        content: 'Can you also support d100?',
+        isStarterMessage: false,
+      },
+      triageReturning({ ready: true, summary: 'unused', clarifyingQuestion: null }),
+      confirmReturning({ confirmed: false, updatedSummary: 'Add a /roll command, including d100' }),
+      noopDispatch,
+    );
+
+    expect(action.type).toBe('reply');
+    if (action.type === 'reply') {
+      expect(action.content).toContain(opUserId);
+      expect(action.content).toContain('Can you also support d100?');
+      expect(action.content).toContain('Add a /roll command, including d100');
+    }
+
+    const request = await prisma.featureRequest.findUniqueOrThrow({
+      where: { discordThreadId: threadId },
+    });
+    expect(request.status).toBe('confirming_summary');
+    expect(request.summary).toBe('Add a /roll command, including d100');
+  });
+});
+
+describe('confirming_summary', () => {
+  it('moves to pending_approval when the OP confirms the summary', async () => {
+    await prisma.featureRequest.create({
+      data: {
+        discordThreadId: threadId,
+        guildId,
+        opUserId,
+        status: 'confirming_summary',
+        summary: 'Add a /roll command',
+      },
+    });
+
+    const action = await handleFeatureRequestMessage(
+      {
+        discordThreadId: threadId,
+        guildId,
+        authorId: opUserId,
+        content: 'Yes, that looks right',
+        isStarterMessage: false,
+      },
+      triageReturning({ ready: true, summary: 'unused', clarifyingQuestion: null }),
+      confirmReturning({ confirmed: true, updatedSummary: 'Add a /roll command' }),
+      noopDispatch,
+    );
+
+    expect(action.type).toBe('reply');
+    if (action.type === 'reply') {
+      expect(action.content).toContain('Add a /roll command');
+      expect(action.content).toContain(config.approverDiscordUserId);
+    }
+
+    const request = await prisma.featureRequest.findUniqueOrThrow({
+      where: { discordThreadId: threadId },
+    });
+    expect(request.status).toBe('pending_approval');
+  });
+
+  it('stays in confirming_summary and updates the summary when the OP requests a change', async () => {
+    await prisma.featureRequest.create({
+      data: {
+        discordThreadId: threadId,
+        guildId,
+        opUserId,
+        status: 'confirming_summary',
+        summary: 'Add a /roll command',
+      },
+    });
+
+    const action = await handleFeatureRequestMessage(
+      {
+        discordThreadId: threadId,
+        guildId,
+        authorId: opUserId,
+        content: 'Actually cap it at 20 dice',
+        isStarterMessage: false,
+      },
+      triageReturning({ ready: true, summary: 'unused', clarifyingQuestion: null }),
+      confirmReturning({
+        confirmed: false,
+        updatedSummary: 'Add a /roll command, capped at 20 dice',
+      }),
+      noopDispatch,
+    );
+
+    expect(action).toEqual({
+      type: 'reply',
+      content:
+        "Add a /roll command, capped at 20 dice\n\nDoes this look right, or is there anything else you'd like to add or change?",
+    });
+
+    const request = await prisma.featureRequest.findUniqueOrThrow({
+      where: { discordThreadId: threadId },
+    });
+    expect(request.status).toBe('confirming_summary');
+    expect(request.summary).toBe('Add a /roll command, capped at 20 dice');
+  });
+
+  it('ignores messages from someone other than the OP', async () => {
+    await prisma.featureRequest.create({
+      data: {
+        discordThreadId: threadId,
+        guildId,
+        opUserId,
+        status: 'confirming_summary',
+        summary: 'Add a /roll command',
+      },
+    });
+
+    const action = await handleFeatureRequestMessage(
+      {
+        discordThreadId: threadId,
+        guildId,
+        authorId: 'someone-else',
+        content: 'looks good to me',
+        isStarterMessage: false,
+      },
+      triageReturning({ ready: true, summary: 'unused', clarifyingQuestion: null }),
+      confirmReturning({ confirmed: true, updatedSummary: 'unused' }),
+      noopDispatch,
+    );
+
+    expect(action).toEqual({ type: 'none' });
+
+    const request = await prisma.featureRequest.findUniqueOrThrow({
+      where: { discordThreadId: threadId },
+    });
+    expect(request.status).toBe('confirming_summary');
   });
 });
 

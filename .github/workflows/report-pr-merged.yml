@@ -1,0 +1,35 @@
+name: Report PR Merged
+
+# Reports status: merged to POST /webhooks/status (see src/server.ts and
+# docs/FEATURE_REQUEST_LIFECYCLE.md) when a feature-dev.yml PR merges, so the bot can post the
+# update back into the originating Discord thread. Only fires for PRs on a
+# "feature-request/<featureRequestId>" branch - feature-dev.yml's deterministic naming (see
+# .github/workflows/feature-dev.yml) is how we recover the correlation ID without needing to
+# call back into our own API to look it up.
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+
+jobs:
+  report-merged:
+    if: >-
+      github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.head.ref, 'feature-request/') &&
+      vars.BOT_PUBLIC_URL != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    steps:
+      - name: Report merged status
+        env:
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          FEATURE_REQUEST_ID="${BRANCH#feature-request/}"
+          curl -sf -X POST "${{ vars.BOT_PUBLIC_URL }}/webhooks/status" \
+            -H "Authorization: Bearer ${{ secrets.STATUS_WEBHOOK_SECRET }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"featureRequestId\": \"${FEATURE_REQUEST_ID}\", \"status\": \"merged\"}"

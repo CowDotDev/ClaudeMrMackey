@@ -45,7 +45,7 @@ export async function triageFeatureRequest(
     .join('\n\n');
 
   const response = await client.messages.parse({
-    model: 'claude-opus-4-8',
+    model: 'claude-haiku-4-5-20251001',
     max_tokens: 1024,
     output_config: {
       effort: 'low',

@@ -133,7 +133,7 @@ and you should have everything needed to continue without re-deriving context.
   **Explicitly out of scope for now** (user's instruction, not just deferred) — see PR #17
   below, which also drops it from "Next up" entirely. The `deployed` enum value stays in the
   Prisma schema (harmless, unreachable without an emitter) but isn't planned work anymore.
-- **PR #17 (branch `feature/confirmation-loop`, not yet opened)** — reworks the triage flow to
+- **PR [#17](https://github.com/CowDotDev/ClaudeMrMackey/pull/17)** — reworks the triage flow to
   add an explicit confirmation step, and lets the approver request changes instead of only
   approving:
   - New `confirming_summary` status (Prisma migration
@@ -159,6 +159,15 @@ and you should have everything needed to continue without re-deriving context.
   - `handleFeatureRequestMessage()`'s signature grew a `confirm: ConfirmFn` parameter (between
     `triage` and `dispatch`), matching the existing `TriageFn`/`DispatchFn` injectable-function
     pattern.
+- **Confirmed live**: a real request ("add a `/coinflip` command") went through
+  `gathering_info` → `confirming_summary` (OP confirmed) → `pending_approval` → `approved` →
+  `feature-dev.yml`, which implemented and opened
+  **PR [#14](https://github.com/CowDotDev/ClaudeMrMackey/pull/14) "Add /coinflip command"** —
+  merged. `report-pr-merged.yml` fired and **succeeded** (not skipped) for that merge, meaning
+  `merged` status reporting (PR #16) also worked live for the first time, end-to-end, with no
+  manual intervention. Still unverified: the `gathering_info` clarifying-question path (every
+  live request so far has been complete on the first message) and the OP-requests-a-change
+  sub-path of `confirming_summary` (only the straight-confirm path has been exercised).
 - **`pr-ai-review.yml` removed entirely** (user's request — "I don't think I'll use it anytime
   soon"), not just left disabled. Deleted `.github/workflows/pr-ai-review.yml`; updated
   `docs/ARCHITECTURE.md`'s "Dev automation pipeline" section (no more AI-review-as-first-gate
@@ -168,30 +177,30 @@ and you should have everything needed to continue without re-deriving context.
   PR #6's entry above still has the original design details (the `id-token: write` gotcha, the
   read-only `allowedTools` scoping) worth reusing rather than re-deriving.
 
-Local main is in sync with PRs #1-#3, #5, #6, and #9-#17. `npm run build/lint/format:check/typecheck/test`
+Local main is in sync with PRs #1-#3, #5, #6, and #9-#18. `npm run build/lint/format:check/typecheck/test`
 all pass as of the last commit on `main`.
 
 ## Next up (in order)
 
-1. **Verify the confirmation loop and clarifying-question loop live** — every live run so far
-   (`/roll`, an earlier session) went straight from an already-complete request to approval, so
-   neither the `gathering_info` clarifying-question back-and-forth nor the new
-   `confirming_summary` confirm/revise loop has been exercised against a real Discord thread
-   yet. Also worth testing an approver change-request live once PR #17 is merged.
+1. **Verify the two remaining unexercised live paths** (see the "Confirmed live" entry above):
+   a `gathering_info` request that's incomplete on the first message (to see the clarifying
+   question round-trip), and requesting a change during `confirming_summary` or
+   `pending_approval` (to see a summary actually get revised, not just confirmed/approved
+   as-is).
 
-`deployed` status reporting is explicitly out of scope for now (see the PR #17 entry above) —
-not on this list. `pr-ai-review.yml` was removed entirely (see "Done" above) rather than
-decided on — nothing left to do there unless it's wanted back later.
+`deployed` status reporting is explicitly out of scope for now (see the PR #16/#17 entries
+above) — not on this list. `pr-ai-review.yml` was removed entirely (see "Done" above) rather
+than decided on — nothing left to do there unless it's wanted back later.
 
 ## Known gaps / things to verify before going further
 
 - **Possible duplicate bot instance risk**: unconfirmed whether Railway's `DISCORD_BOT_TOKEN`
   is the same token as local `npm run dev` — see "Environment / secrets status" below. If so,
   running both at once double-processes every message in the test server.
-- `merged` reporting (PR #16) hasn't been exercised live yet — the next `feature-request/*` PR
-  that merges will be the first real test.
-- The confirmation loop and the clarifying-question loop are both unverified live — see "Next
-  up" step 1.
+- The clarifying-question path and the change-request path are both unverified live — see
+  "Next up" step 1. Everything else in the pipeline (dispatch, `feature-dev.yml`,
+  `dev_in_progress`/`pr_open`/`merged` reporting, the straight-confirm path) is now confirmed
+  working end-to-end.
 - Local dev requires Docker Desktop running (`docker compose up -d`) before `npm run dev`
   will find a database.
 

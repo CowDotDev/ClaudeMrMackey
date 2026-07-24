@@ -102,24 +102,41 @@ and you should have everything needed to continue without re-deriving context.
   a general-purpose HTTP tool alongside `STATUS_WEBHOOK_SECRET` would be a
   prompt-injection/exfiltration risk per CLAUDE.md's untrusted-input rule. `merged`/`deployed`
   reporting (a PR-closed-and-merged workflow, a Railway deploy webhook) is still unwired.
+- **PR #13 (branch `fix/prod-migrate-deploy`, not yet opened)** — the Railway deploy went
+  green and the bot came online, but it couldn't handle any messages: `ECONNREFUSED` connecting
+  to Postgres (see "Next up" below for the full diagnosis and fix — this PR is only the
+  code-side half of it). Changed `npm start` from `node dist/index.js` to
+  `prisma migrate deploy && node dist/index.js`, since nothing was applying migrations against
+  the production database (`postinstall` only runs `prisma generate`) — even after Railway's
+  `DATABASE_URL` is fixed, the schema wouldn't exist without this.
 
-Local main is in sync with PRs #1-#3, #5, #6, and #9-#11. `npm run build/lint/format:check/typecheck/test`
+Local main is in sync with PRs #1-#3, #5, #6, and #9-#12. `npm run build/lint/format:check/typecheck/test`
 all pass as of the last commit on `main`.
 
 ## Next up (in order)
 
-1. **Deploy the bot to Railway and get its public URL.** Needed for anything below to matter —
-   without a reachable bot instance, `feature-dev.yml`'s status-report steps stay permanently
-   skipped. Requires the production secrets listed under "Still needed" below.
-2. **Set `BOT_PUBLIC_URL` as a GitHub Actions repo _variable_** (Settings → Secrets and
-   variables → Actions → Variables tab, not Secrets — it's not sensitive) to the Railway URL
-   from step 1, **and** `STATUS_WEBHOOK_SECRET` as a GitHub Actions repo _secret_ matching
-   whatever value Railway has for it. This turns on the `dev_in_progress`/`pr_open` reporting
-   already wired in `feature-dev.yml`.
-3. **Verify live**: approve a feature request, confirm the thread gets a "Development has
+1. **Fix Railway's `DATABASE_URL`.** The Railway app deploy went green and the bot shows
+   online, but every message handler call fails: `ECONNREFUSED` on
+   `prisma.featureRequest.create()` — the app can't reach a Postgres server at all (TCP
+   connection refused, not a missing-table/auth error). Add a Postgres service in the Railway
+   project (**+ New → Database → Add PostgreSQL**) if one doesn't exist yet, then set the app
+   service's `DATABASE_URL` variable to reference it (Railway's "Add Reference" picker, e.g.
+   `${{Postgres.DATABASE_URL}}`) rather than a hardcoded value — it was very likely still the
+   `.env.example` local-docker-compose default (`localhost:5432`, meaningless inside Railway's
+   container). PR #13 (below) makes `npm start` run `prisma migrate deploy` first, so once
+   connectivity is fixed the schema should apply automatically on next deploy — no separate
+   migration step needed.
+2. **Get the bot's Railway public URL** once it's actually working end-to-end (DB connected,
+   confirm by posting in the Forum Channel and getting a reply). Needed for step 3.
+3. **Set `BOT_PUBLIC_URL` as a GitHub Actions repo _variable_** (Settings → Secrets and
+   variables → Actions → Variables tab, not Secrets — it's not sensitive) to the URL from step
+   2, **and** `STATUS_WEBHOOK_SECRET` as a GitHub Actions repo _secret_ matching whatever value
+   Railway has for it. This turns on the `dev_in_progress`/`pr_open` reporting already wired in
+   `feature-dev.yml` (PR #12).
+4. **Verify live**: approve a feature request, confirm the thread gets a "Development has
    started..." message and then a PR link, matching `applyStatusUpdate()`'s messages in
    `src/featureRequests/service.ts`.
-4. **Wire `merged`/`deployed` reporting**: a new workflow (or an addition to `pr-ai-review.yml`
+5. **Wire `merged`/`deployed` reporting**: a new workflow (or an addition to `pr-ai-review.yml`
    if it gets re-enabled) triggered on `pull_request: closed` with `merged == true` to report
    `status: merged`; a Railway deploy webhook (or a small polling/webhook mechanism) to report
    `status: deployed`. Neither exists yet.
@@ -129,7 +146,13 @@ all pass as of the last commit on `main`.
 - The triage loop has not been exercised against a live Discord Forum Channel yet in the sense
   of `gathering_info` → clarifying questions — the one live run so far went straight through
   from an already-complete request. Worth confirming the clarifying-question loop separately.
-- Nothing calls `POST /webhooks/status` in production yet — see "Next up" steps 1-3.
+- Nothing calls `POST /webhooks/status` in production yet — blocked on the Railway `DATABASE_URL`
+  fix, see "Next up" steps 1-4.
+- The Railway deployment is currently broken (see "Next up" step 1) — the bot connects to
+  Discord fine but can't reach Postgres, so it silently fails every message it tries to handle
+  (errors only visible in Railway's logs, nothing surfaces back to Discord since
+  `registerFeatureRequestHandlers()` in `src/discord/featureRequests.ts` only `console.error`s
+  on failure by design — a thrown DB error shouldn't become a confusing reply to the user).
 - Local dev requires Docker Desktop running (`docker compose up -d`) before `npm run dev`
   will find a database.
 

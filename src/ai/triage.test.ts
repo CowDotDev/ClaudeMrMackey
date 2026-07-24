@@ -29,7 +29,7 @@ describe('triageFeatureRequest', () => {
     expect(client.messages.parse).toHaveBeenCalledTimes(1);
 
     const call = client.messages.parse.mock.calls[0][0];
-    expect(call.model).toBe('claude-opus-4-8');
+    expect(call.model).toBe('claude-haiku-4-5-20251001');
     expect(call.messages[0].content).toBe(
       'Requester: Add a dice roll command\n\nBot: What dice notation should it support?\n\nRequester: 1d20 and similar',
     );

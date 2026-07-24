@@ -99,7 +99,7 @@ and you should have everything needed to continue without re-deriving context.
   PR-creation step runs with content derived from an untrusted Discord request, and handing it
   a general-purpose HTTP tool alongside `STATUS_WEBHOOK_SECRET` would be a
   prompt-injection/exfiltration risk per CLAUDE.md's untrusted-input rule. `merged`/`deployed`
-  reporting (a PR-closed-and-merged workflow, a Railway deploy webhook) is still unwired.
+  reporting was still unwired at the time this PR landed — see PR #16 below.
 - **PR [#13](https://github.com/CowDotDev/ClaudeMrMackey/pull/13)** — the Railway deploy went
   green and the bot came online, but it couldn't handle any messages: `ECONNREFUSED` connecting
   to Postgres. That half was a Railway dashboard fix (below), but this PR fixed the related
@@ -120,19 +120,28 @@ and you should have everything needed to continue without re-deriving context.
   also failed on the same bad URL), then succeeded once sent in the right order — and the
   Discord thread received both status messages. `feature-dev.yml`'s own report steps should now
   work unattended on every future run.
+- **PR [#16](https://github.com/CowDotDev/ClaudeMrMackey/pull/16)** — `merged` status
+  reporting: a new `report-pr-merged.yml` workflow, fires on `pull_request: closed` with
+  `merged == true`, but only for PRs on a `feature-request/<featureRequestId>` branch
+  (`feature-dev.yml`'s deterministic naming) — recovers the correlation ID from the branch name
+  directly rather than needing a new API to look up a `FeatureRequest` by PR number. Same guard
+  pattern as PR #12's steps: gated on `vars.BOT_PUBLIC_URL != ''`, `continue-on-error: true`.
+  **`deployed` reporting deliberately left out** — checked Railway's webhook docs first: the
+  payload has no `featureRequestId`, fires project-wide rather than per-feature-request, and
+  would need a new _inbound_ authenticated endpoint plus commit-to-PR correlation via the
+  GitHub API (or a "mark every currently-`merged` request `deployed` on any successful deploy"
+  heuristic), on top of Railway dashboard configuration this session can't do. Scoped as
+  separate follow-up work, not guessed at here.
 
-Local main is in sync with PRs #1-#3, #5, #6, and #9-#13. `npm run build/lint/format:check/typecheck/test`
+Local main is in sync with PRs #1-#3, #5, #6, and #9-#16. `npm run build/lint/format:check/typecheck/test`
 all pass as of the last commit on `main`.
 
 ## Next up (in order)
 
-1. **Wire `merged`/`deployed` reporting** — the only unimplemented part of the status-webhook
-   loop. Needs: a new workflow (or an addition to `pr-ai-review.yml` if it gets re-enabled)
-   triggered on `pull_request: closed` with `merged == true` that looks up the `FeatureRequest`
-   by `githubPrNumber` (or thread through `featureRequestId` some other way — PR bodies don't
-   currently embed it, worth adding) and calls `POST /webhooks/status` with `status: merged`;
-   separately, a Railway deploy webhook (or small polling mechanism) to report
-   `status: deployed`. Neither exists yet.
+1. **Design and wire `deployed` reporting.** See the PR #16 entry above for what it needs: an
+   inbound endpoint for Railway's deploy webhook, some way to map a deployed commit back to a
+   `FeatureRequest` (or the simpler "mark all `merged` → `deployed` on any successful deploy"
+   heuristic), and Railway dashboard configuration (Settings → Webhooks) pointing at it.
 2. **Verify the `gathering_info` clarifying-question loop live** — every live run so far
    (`/roll`, this session) went straight to `pending_approval` from an already-complete
    request. The triage loop's back-and-forth (Claude asks a follow-up, OP replies, re-triages)
@@ -147,7 +156,9 @@ all pass as of the last commit on `main`.
   running both at once double-processes every message in the test server.
 - `pr-ai-review.yml` is still manually disabled (`gh workflow disable`, user's request from
   earlier in this project) — `feature-dev.yml` and `ci.yml` are unaffected.
-- `merged`/`deployed` status reporting doesn't exist yet — see "Next up" step 1.
+- `deployed` status reporting doesn't exist yet — see "Next up" step 1. `merged` reporting
+  exists (PR #16) but hasn't been exercised live yet — the next `feature-request/*` PR that
+  merges will be the first real test.
 - The clarifying-question half of the triage loop is unverified live — see "Next up" step 2.
 - Local dev requires Docker Desktop running (`docker compose up -d`) before `npm run dev`
   will find a database.

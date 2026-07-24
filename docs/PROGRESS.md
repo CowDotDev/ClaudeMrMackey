@@ -159,8 +159,16 @@ and you should have everything needed to continue without re-deriving context.
   - `handleFeatureRequestMessage()`'s signature grew a `confirm: ConfirmFn` parameter (between
     `triage` and `dispatch`), matching the existing `TriageFn`/`DispatchFn` injectable-function
     pattern.
+- **`pr-ai-review.yml` removed entirely** (user's request — "I don't think I'll use it anytime
+  soon"), not just left disabled. Deleted `.github/workflows/pr-ai-review.yml`; updated
+  `docs/ARCHITECTURE.md`'s "Dev automation pipeline" section (no more AI-review-as-first-gate
+  bullet; `report-pr-merged.yml` documented in its place; the "human gates" bullet no longer
+  references reading an AI review before merging). `feature-dev.yml` and `ci.yml` are
+  unaffected — this workflow never fed into either. If AI PR review is wanted again later,
+  PR #6's entry above still has the original design details (the `id-token: write` gotcha, the
+  read-only `allowedTools` scoping) worth reusing rather than re-deriving.
 
-Local main is in sync with PRs #1-#3, #5, #6, and #9-#16. `npm run build/lint/format:check/typecheck/test`
+Local main is in sync with PRs #1-#3, #5, #6, and #9-#17. `npm run build/lint/format:check/typecheck/test`
 all pass as of the last commit on `main`.
 
 ## Next up (in order)
@@ -170,19 +178,16 @@ all pass as of the last commit on `main`.
    neither the `gathering_info` clarifying-question back-and-forth nor the new
    `confirming_summary` confirm/revise loop has been exercised against a real Discord thread
    yet. Also worth testing an approver change-request live once PR #17 is merged.
-2. **Decide on `pr-ai-review.yml`** — still manually disabled at the user's request (see
-   below). Re-enable with `gh workflow enable "PR AI Review"` whenever it's wanted.
 
 `deployed` status reporting is explicitly out of scope for now (see the PR #17 entry above) —
-not on this list.
+not on this list. `pr-ai-review.yml` was removed entirely (see "Done" above) rather than
+decided on — nothing left to do there unless it's wanted back later.
 
 ## Known gaps / things to verify before going further
 
 - **Possible duplicate bot instance risk**: unconfirmed whether Railway's `DISCORD_BOT_TOKEN`
   is the same token as local `npm run dev` — see "Environment / secrets status" below. If so,
   running both at once double-processes every message in the test server.
-- `pr-ai-review.yml` is still manually disabled (`gh workflow disable`, user's request from
-  earlier in this project) — `feature-dev.yml` and `ci.yml` are unaffected.
 - `merged` reporting (PR #16) hasn't been exercised live yet — the next `feature-request/*` PR
   that merges will be the first real test.
 - The confirmation loop and the clarifying-question loop are both unverified live — see "Next
@@ -200,8 +205,7 @@ one generated locally this session — see PR #9 above).
 Set on GitHub (confirmed this session):
 
 - `ANTHROPIC_API_KEY` GitHub Actions repo secret (Settings → Secrets and variables → Actions) —
-  separate from the local `.env` value, this is what `feature-dev.yml` and `pr-ai-review.yml`
-  use.
+  separate from the local `.env` value, this is what `feature-dev.yml` uses.
 - `STATUS_WEBHOOK_SECRET` GitHub Actions repo secret — confirmed matching whatever value
   Railway has (a direct authenticated call to the deployed bot succeeded with it).
 - `BOT_PUBLIC_URL` GitHub Actions repo **variable**, correctly set to

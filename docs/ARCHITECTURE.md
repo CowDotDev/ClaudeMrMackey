@@ -28,10 +28,14 @@ MrMackey is two cooperating subsystems, both living in this repo.
 - **`feature-dev.yml`**: on `repository_dispatch`, runs `anthropics/claude-code-action`
   headless with the feature summary as the prompt (governed by [`CLAUDE.md`](../CLAUDE.md)),
   opens a PR linking back to the Discord thread. Scoped to branch+PR only, never `main`.
-- **`pr-ai-review.yml`**: on PR open/sync, runs an AI review pass as a first gate.
+- **`report-pr-merged.yml`**: on `pull_request: closed` with `merged == true`, reports
+  `status: merged` back through the same webhook so the bot can post an update into the
+  originating thread.
 - **Human gates**: a person comments `Approved` in Discord before any code is written, and a
-  person merges the PR on GitHub after reading the AI review. These two human checkpoints are
-  the actual security boundary — the AI steps are gates of convenience, not trust boundaries.
+  person reviews and merges the PR on GitHub. These two human checkpoints are the actual
+  security boundary — everything upstream of them is a gate of convenience, not a trust
+  boundary. (An earlier `pr-ai-review.yml` AI-review-as-first-gate step existed and was removed
+  — not currently in use.)
 - **Deploy**: Railway's GitHub integration auto-builds/deploys on merge to `main`.
 
 ## Why this order

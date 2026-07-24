@@ -31,7 +31,16 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     env:
+      # npm test loads src/config.ts, which requires every one of these to be set - see
+      # .env.example. Fake but well-formed values are fine; nothing here hits a real service.
       DATABASE_URL: postgresql://mrmackey:mrmackey@localhost:5432/mrmackey
+      DISCORD_BOT_TOKEN: test-token
+      ANTHROPIC_API_KEY: sk-ant-test
+      APPROVER_DISCORD_USER_ID: test-approver
+      FEATURE_REQUEST_CHANNEL_ID: test-channel
+      GITHUB_TOKEN: ghp_test
+      GITHUB_REPO: CowDotDev/ClaudeMrMackey
+      STATUS_WEBHOOK_SECRET: test-webhook-secret
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout main

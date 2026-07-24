@@ -1,15 +1,17 @@
 import { config } from './config.js';
 import { createDiscordClient, login } from './discord/client.js';
 import { registerFeatureRequestHandlers } from './discord/featureRequests.js';
+import { createDiscordNotifier } from './discord/notify.js';
 import { createServer, startServer } from './server.js';
 
 async function main(): Promise<void> {
-  const server = createServer();
+  const client = createDiscordClient();
+  registerFeatureRequestHandlers(client);
+
+  const server = createServer(createDiscordNotifier(client));
   await startServer(server);
   console.log(`Health check listening on port ${config.port}`);
 
-  const client = createDiscordClient();
-  registerFeatureRequestHandlers(client);
   await login(client);
 }
 

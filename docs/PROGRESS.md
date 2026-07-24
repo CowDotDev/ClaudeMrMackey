@@ -19,7 +19,7 @@ and you should have everything needed to continue without re-deriving context.
   (the thin Discord adapter). Handles `gathering_info → pending_approval → approved`.
   **Not yet verified against a real Discord Forum Channel/thread** — only unit/integration
   tested. Do that live check before trusting the loop end-to-end.
-- **PR #5 (branch `feature/github-dispatch`, not yet opened)** — wires the actual GitHub
+- **PR [#5](https://github.com/CowDotDev/ClaudeMrMackey/pull/5)** — wires the actual GitHub
   `repository_dispatch` call: `src/github/dispatch.ts` (`dispatchFeatureRequest`, Octokit
   `repos.createDispatchEvent`, injectable-client pattern matching `triage.ts`), called from the
   approval branch of `handleFollowUp()` in `src/featureRequests/service.ts` _before_ the DB
@@ -27,9 +27,7 @@ and you should have everything needed to continue without re-deriving context.
   the approver can just re-comment `Approved` to retry). `GITHUB_TOKEN` / `GITHUB_REPO` are now
   required config in `src/config.ts`. The dispatch payload is
   `{ featureRequestId, discordThreadId, summary }` — `featureRequestId` is the correlation ID
-  the future status-webhook (step 3 below) should use to find its way back to the right thread.
-  **Only unit tested (mocked Octokit client)** at the time it was written — merged as PR
-  [#5](https://github.com/CowDotDev/ClaudeMrMackey/pull/5).
+  the status-webhook (PR #9, below) uses to find its way back to the right thread.
 - **PR [#6](https://github.com/CowDotDev/ClaudeMrMackey/pull/6)** — the three GitHub Actions
   workflows this repo's whole pipeline depends on, all under `.github/workflows/`:
   - `feature-dev.yml` — triggers on the `feature-request-approved` `repository_dispatch` event
@@ -90,7 +88,7 @@ and you should have everything needed to continue without re-deriving context.
   `triageFeatureRequest()`'s model from `claude-opus-4-8` to `claude-haiku-4-5-20251001`, per
   instruction) and updated `triage.test.ts` to match, on its own branch since it was unrelated
   to PR #9.
-- **PR #12 (branch `feature/report-status-webhook-calls`, not yet opened)** —
+- **PR [#12](https://github.com/CowDotDev/ClaudeMrMackey/pull/12)** —
   `feature-dev.yml` now calls `POST /webhooks/status`: a "Report dev_in_progress status" step
   right after the branch is created, and a "Look up the opened PR" + "Report pr_open status"
   pair right after Claude's step, using `gh pr list --head <branch>` to find the PR number
@@ -102,57 +100,55 @@ and you should have everything needed to continue without re-deriving context.
   a general-purpose HTTP tool alongside `STATUS_WEBHOOK_SECRET` would be a
   prompt-injection/exfiltration risk per CLAUDE.md's untrusted-input rule. `merged`/`deployed`
   reporting (a PR-closed-and-merged workflow, a Railway deploy webhook) is still unwired.
-- **PR #13 (branch `fix/prod-migrate-deploy`, not yet opened)** — the Railway deploy went
+- **PR [#13](https://github.com/CowDotDev/ClaudeMrMackey/pull/13)** — the Railway deploy went
   green and the bot came online, but it couldn't handle any messages: `ECONNREFUSED` connecting
-  to Postgres (see "Next up" below for the full diagnosis and fix — this PR is only the
-  code-side half of it). Changed `npm start` from `node dist/index.js` to
+  to Postgres. That half was a Railway dashboard fix (below), but this PR fixed the related
+  code gap: changed `npm start` from `node dist/index.js` to
   `prisma migrate deploy && node dist/index.js`, since nothing was applying migrations against
-  the production database (`postinstall` only runs `prisma generate`) — even after Railway's
-  `DATABASE_URL` is fixed, the schema wouldn't exist without this.
+  the production database (`postinstall` only runs `prisma generate`).
+- **The full pipeline is now confirmed working live, end to end, including the status
+  webhook.** After PR #13 merged and the Railway `DATABASE_URL` was fixed (pointed at a real
+  provisioned Postgres service instead of the `.env.example` local-docker-compose default), the
+  remaining bug was `BOT_PUBLIC_URL` (a GitHub Actions repo variable): it was set to
+  `claudemrmackey-production.up.railway.app:8080` — missing the `https://` scheme _and_
+  carrying an internal container port that has no meaning on Railway's public `*.up.railway.app`
+  domain (that domain is served via Railway's edge proxy on standard 443 and maps to the
+  container's port automatically; the port must never appear in the public URL). Corrected to
+  `https://claudemrmackey-production.up.railway.app` via `gh variable set`. Verified live: a
+  direct `curl` to `POST /webhooks/status` for the PR #14 feature request correctly rejected an
+  out-of-order `pr_open` call with 409 (`dev_in_progress` hadn't landed yet, since its report
+  also failed on the same bad URL), then succeeded once sent in the right order — and the
+  Discord thread received both status messages. `feature-dev.yml`'s own report steps should now
+  work unattended on every future run.
 
-Local main is in sync with PRs #1-#3, #5, #6, and #9-#12. `npm run build/lint/format:check/typecheck/test`
+Local main is in sync with PRs #1-#3, #5, #6, and #9-#13. `npm run build/lint/format:check/typecheck/test`
 all pass as of the last commit on `main`.
 
 ## Next up (in order)
 
-1. **Fix Railway's `DATABASE_URL`.** The Railway app deploy went green and the bot shows
-   online, but every message handler call fails: `ECONNREFUSED` on
-   `prisma.featureRequest.create()` — the app can't reach a Postgres server at all (TCP
-   connection refused, not a missing-table/auth error). Add a Postgres service in the Railway
-   project (**+ New → Database → Add PostgreSQL**) if one doesn't exist yet, then set the app
-   service's `DATABASE_URL` variable to reference it (Railway's "Add Reference" picker, e.g.
-   `${{Postgres.DATABASE_URL}}`) rather than a hardcoded value — it was very likely still the
-   `.env.example` local-docker-compose default (`localhost:5432`, meaningless inside Railway's
-   container). PR #13 (below) makes `npm start` run `prisma migrate deploy` first, so once
-   connectivity is fixed the schema should apply automatically on next deploy — no separate
-   migration step needed.
-2. **Get the bot's Railway public URL** once it's actually working end-to-end (DB connected,
-   confirm by posting in the Forum Channel and getting a reply). Needed for step 3.
-3. **Set `BOT_PUBLIC_URL` as a GitHub Actions repo _variable_** (Settings → Secrets and
-   variables → Actions → Variables tab, not Secrets — it's not sensitive) to the URL from step
-   2, **and** `STATUS_WEBHOOK_SECRET` as a GitHub Actions repo _secret_ matching whatever value
-   Railway has for it. This turns on the `dev_in_progress`/`pr_open` reporting already wired in
-   `feature-dev.yml` (PR #12).
-4. **Verify live**: approve a feature request, confirm the thread gets a "Development has
-   started..." message and then a PR link, matching `applyStatusUpdate()`'s messages in
-   `src/featureRequests/service.ts`.
-5. **Wire `merged`/`deployed` reporting**: a new workflow (or an addition to `pr-ai-review.yml`
-   if it gets re-enabled) triggered on `pull_request: closed` with `merged == true` to report
-   `status: merged`; a Railway deploy webhook (or a small polling/webhook mechanism) to report
+1. **Wire `merged`/`deployed` reporting** — the only unimplemented part of the status-webhook
+   loop. Needs: a new workflow (or an addition to `pr-ai-review.yml` if it gets re-enabled)
+   triggered on `pull_request: closed` with `merged == true` that looks up the `FeatureRequest`
+   by `githubPrNumber` (or thread through `featureRequestId` some other way — PR bodies don't
+   currently embed it, worth adding) and calls `POST /webhooks/status` with `status: merged`;
+   separately, a Railway deploy webhook (or small polling mechanism) to report
    `status: deployed`. Neither exists yet.
+2. **Verify the `gathering_info` clarifying-question loop live** — every live run so far
+   (`/roll`, this session) went straight to `pending_approval` from an already-complete
+   request. The triage loop's back-and-forth (Claude asks a follow-up, OP replies, re-triages)
+   has only been unit/integration tested, never exercised against a real Discord thread.
+3. **Decide on `pr-ai-review.yml`** — still manually disabled at the user's request (see
+   below). Re-enable with `gh workflow enable "PR AI Review"` whenever it's wanted.
 
 ## Known gaps / things to verify before going further
 
-- The triage loop has not been exercised against a live Discord Forum Channel yet in the sense
-  of `gathering_info` → clarifying questions — the one live run so far went straight through
-  from an already-complete request. Worth confirming the clarifying-question loop separately.
-- Nothing calls `POST /webhooks/status` in production yet — blocked on the Railway `DATABASE_URL`
-  fix, see "Next up" steps 1-4.
-- The Railway deployment is currently broken (see "Next up" step 1) — the bot connects to
-  Discord fine but can't reach Postgres, so it silently fails every message it tries to handle
-  (errors only visible in Railway's logs, nothing surfaces back to Discord since
-  `registerFeatureRequestHandlers()` in `src/discord/featureRequests.ts` only `console.error`s
-  on failure by design — a thrown DB error shouldn't become a confusing reply to the user).
+- **Possible duplicate bot instance risk**: unconfirmed whether Railway's `DISCORD_BOT_TOKEN`
+  is the same token as local `npm run dev` — see "Environment / secrets status" below. If so,
+  running both at once double-processes every message in the test server.
+- `pr-ai-review.yml` is still manually disabled (`gh workflow disable`, user's request from
+  earlier in this project) — `feature-dev.yml` and `ci.yml` are unaffected.
+- `merged`/`deployed` status reporting doesn't exist yet — see "Next up" step 1.
+- The clarifying-question half of the triage loop is unverified live — see "Next up" step 2.
 - Local dev requires Docker Desktop running (`docker compose up -d`) before `npm run dev`
   will find a database.
 
@@ -168,19 +164,22 @@ Set on GitHub (confirmed this session):
 - `ANTHROPIC_API_KEY` GitHub Actions repo secret (Settings → Secrets and variables → Actions) —
   separate from the local `.env` value, this is what `feature-dev.yml` and `pr-ai-review.yml`
   use.
+- `STATUS_WEBHOOK_SECRET` GitHub Actions repo secret — confirmed matching whatever value
+  Railway has (a direct authenticated call to the deployed bot succeeded with it).
+- `BOT_PUBLIC_URL` GitHub Actions repo **variable**, correctly set to
+  `https://claudemrmackey-production.up.railway.app` (no port, `https://` scheme — see PR #13
+  entry above for what was wrong with it before).
 - Claude Code GitHub App installed on the repo.
 - "Allow GitHub Actions to create and approve pull requests" is on.
 
-Still needed (see "Next up" above):
-
-- The bot deployed to Railway with a public URL — nothing has been deployed there yet as far as
-  this session could tell.
-- `BOT_PUBLIC_URL` as a GitHub Actions repo **variable** (not secret) and `STATUS_WEBHOOK_SECRET`
-  as a GitHub Actions repo **secret**, once the URL exists.
-- For production: the production Discord bot token (application ID `966793705124151356`), a
-  `DATABASE_URL` from Railway's Postgres add-on, and a production `STATUS_WEBHOOK_SECRET` — all
-  set directly in Railway's environment variables, never copied into this repo or a local
-  `.env`. The Railway `STATUS_WEBHOOK_SECRET` value and the GitHub Actions secret of the same
-  name (above) must match — that's how `feature-dev.yml` authenticates to the deployed bot.
+Railway (confirmed working this session): app service deployed, `DATABASE_URL` pointed at a
+real provisioned Postgres service, `STATUS_WEBHOOK_SECRET` set and matching the GitHub Actions
+secret above. **Open question, not yet confirmed either way**: whether Railway's
+`DISCORD_BOT_TOKEN` is the same test-application token used by local `npm run dev`, or the
+separate production Discord application (app ID `966793705124151356`) mentioned in earlier
+sessions. If it's the _same_ token, running local dev and the Railway deployment
+simultaneously means two client sessions handling every message in the test server, which
+would double-process everything (duplicate DB rows, duplicate Discord replies) — worth
+confirming before relying on both being up at once.
 
 Railway is already connected to this GitHub repo and auto-deploys `main`.

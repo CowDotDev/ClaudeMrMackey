@@ -1,6 +1,7 @@
 import { config } from './config.js';
 import { createDiscordClient, login } from './discord/client.js';
 import { registerCommandHandlers } from './discord/commands.js';
+import { registerCustomCommandHandlers } from './discord/customCommands.js';
 import { registerFeatureRequestHandlers } from './discord/featureRequests.js';
 import { createDiscordNotifier } from './discord/notify.js';
 import { createServer, startServer } from './server.js';
@@ -8,6 +9,7 @@ import { createServer, startServer } from './server.js';
 async function main(): Promise<void> {
   const client = createDiscordClient();
   registerCommandHandlers(client);
+  registerCustomCommandHandlers(client);
   registerFeatureRequestHandlers(client);
 
   const server = createServer(createDiscordNotifier(client));

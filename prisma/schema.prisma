@@ -37,6 +37,18 @@ model FeatureRequest {
   events            FeatureRequestEvent[]
 }
 
+// User-registered keyword responses, scoped per guild. Triggered with !<keyword>.
+model CustomCommand {
+  id        String   @id @default(cuid())
+  guildId   String
+  keyword   String
+  response  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([guildId, keyword])
+}
+
 // Only OP and bot messages are ever written here - see docs/FEATURE_REQUEST_LIFECYCLE.md.
 model FeatureRequestEvent {
   id               String                    @id @default(cuid())

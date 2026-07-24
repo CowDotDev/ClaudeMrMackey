@@ -5,6 +5,19 @@ import type { DispatchFn } from '../github/dispatch.js';
 
 export type TriageFn = (messages: TriageMessage[]) => Promise<TriageVerdict>;
 
+export type DevStatus = 'dev_in_progress' | 'pr_open' | 'merged' | 'deployed';
+
+export interface StatusUpdate {
+  featureRequestId: string;
+  status: DevStatus;
+  prNumber?: number;
+}
+
+export type StatusUpdateResult =
+  | { type: 'notify'; discordThreadId: string; content: string }
+  | { type: 'not_found' }
+  | { type: 'invalid_transition' };
+
 export interface IncomingMessage {
   discordThreadId: string;
   guildId: string;
@@ -120,4 +133,44 @@ async function runTriageAndRespond(
   });
 
   return { type: 'reply', content };
+}
+
+// See docs/FEATURE_REQUEST_LIFECYCLE.md - each status only ever advances to the one next
+// status in this sequence, driven by GitHub Actions / Railway calling POST /webhooks/status.
+const NEXT_STATUS: Record<string, DevStatus> = {
+  approved: 'dev_in_progress',
+  dev_in_progress: 'pr_open',
+  pr_open: 'merged',
+  merged: 'deployed',
+};
+
+const STATUS_MESSAGES: Record<DevStatus, (prNumber?: number) => string> = {
+  dev_in_progress: () => 'Development has started on this request.',
+  pr_open: (prNumber) =>
+    `A pull request is open: https://github.com/${config.githubRepo}/pull/${prNumber}`,
+  merged: () => 'The pull request has been merged into main.',
+  deployed: () => "This feature is live! Let us know if it doesn't behave as expected.",
+};
+
+export async function applyStatusUpdate(update: StatusUpdate): Promise<StatusUpdateResult> {
+  const request = await prisma.featureRequest.findUnique({
+    where: { id: update.featureRequestId },
+  });
+  if (!request) return { type: 'not_found' };
+  if (NEXT_STATUS[request.status] !== update.status) return { type: 'invalid_transition' };
+
+  await prisma.featureRequest.update({
+    where: { id: request.id },
+    data: {
+      status: update.status,
+      ...(update.prNumber !== undefined ? { githubPrNumber: update.prNumber } : {}),
+    },
+  });
+
+  const content = STATUS_MESSAGES[update.status](update.prNumber);
+  await prisma.featureRequestEvent.create({
+    data: { featureRequestId: request.id, author: 'bot', content },
+  });
+
+  return { type: 'notify', discordThreadId: request.discordThreadId, content };
 }

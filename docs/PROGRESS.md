@@ -58,52 +58,70 @@ and you should have everything needed to continue without re-deriving context.
     repo — the action doesn't work from workflow YAML alone. **Done**, confirmed by
     `pr-ai-review.yml` passing on PR #6 after install.
 
+- **"Allow GitHub Actions to create and approve pull requests"** is now **on** (was the
+  blocker above). `pr-ai-review.yml` is currently **manually disabled**
+  (`gh workflow disable "PR AI Review"`, at the user's request) — the workflow file is
+  unchanged, just turned off at the repo level. Re-enable with
+  `gh workflow enable "PR AI Review"` when it's wanted again. `feature-dev.yml` and `ci.yml`
+  are unaffected.
+- **PR #9 (branch `feature/status-webhook`, not yet opened)** — the status-webhook loop back
+  into Discord (original task 8): `applyStatusUpdate()` in `src/featureRequests/service.ts` is
+  a small state machine (`approved → dev_in_progress → pr_open → merged → deployed`, see
+  `docs/FEATURE_REQUEST_LIFECYCLE.md`) that only accepts the one valid next status, updates the
+  `FeatureRequest` row (recording `githubPrNumber` on `pr_open`), and logs a `bot`
+  `FeatureRequestEvent`. `POST /webhooks/status` in `src/server.ts` is the new authenticated
+  (`Authorization: Bearer <STATUS_WEBHOOK_SECRET>`) Fastify route GitHub Actions/Railway will
+  call, which then uses `src/discord/notify.ts` (`createDiscordNotifier`, a thin wrapper around
+  `client.channels.fetch` + `.send`) to post the update into the originating thread.
+  `STATUS_WEBHOOK_SECRET` is now required config; a value was generated and added to the local
+  `.env` this session (it's an arbitrary shared secret, not an external credential, so safe to
+  generate locally rather than needing to come from the user).
+
+  **What this PR does _not_ do**: nothing calls this endpoint yet. `feature-dev.yml` doesn't
+  `curl` it after `gh pr create`, there's no workflow reporting `merged` on PR close, and
+  Railway isn't configured to call it on deploy. Wiring those emitters is separate follow-up
+  work (needs the bot's public Railway URL as a new `BOT_PUBLIC_URL`-style value plus
+  `STATUS_WEBHOOK_SECRET` set as both a GitHub Actions secret and a Railway env var — neither
+  is set anywhere outside the local `.env` yet).
+
 Local main is in sync with PRs #1-#3, #5, and #6. `npm run build/lint/format:check/typecheck/test`
 all pass as of the last commit on `main`.
 
 ## Next up (in order)
 
-1. **Enable Actions PR creation before triggering `feature-dev.yml` for real.**
-   `gh api repos/CowDotDev/ClaudeMrMackey/actions/permissions/workflow` currently returns
-   `can_approve_pull_request_reviews: false` — this is the "Allow GitHub Actions to create and
-   approve pull requests" checkbox under repo Settings → Actions → General → Workflow
-   permissions, and it's a hard governor independent of the `permissions:` block a workflow
-   declares. With it off, `feature-dev.yml`'s `gh pr create` step will fail even though the
-   workflow itself requests `pull-requests: write`. This is a repo security setting, so it
-   needs a human to flip it deliberately rather than an agent doing it automatically. (The
-   same check also shows `default_workflow_permissions: read`, but that only matters for
-   workflows that omit an explicit `permissions:` block — all three of ours declare one, so it
-   doesn't need to change.)
-2. **Verify the pipeline live end-to-end**: post a feature request in the Discord Forum
+1. **Verify the pipeline live end-to-end**: post a feature request in the Discord Forum
    Channel, get it to `pending_approval`, comment `Approved`, and confirm a `repository_dispatch`
    fires and `feature-dev.yml` runs and opens a PR. Fix whatever breaks — this has never run
-   for real. `pr-ai-review.yml` won't fire during this (see below) — that's expected for now.
-3. **Status webhook loop back into Discord (original task 8).** Add a POST route to the
-   existing Fastify instance in `src/server.ts` that GitHub Actions / Railway can call to
-   report PR-opened / merged / deployed events, and have it post back into the originating
-   Discord thread (look up by `FeatureRequest.githubPrNumber` or the `featureRequestId`
-   correlation ID already included in the dispatch payload — see PR #5 above).
+   for real. `pr-ai-review.yml` won't fire during this (it's disabled, see above) — expected.
+2. **Wire something to actually call `POST /webhooks/status`** now that PR #9 exists: at
+   minimum, have `feature-dev.yml` `curl` it with `status: pr_open` and the PR number right
+   after `gh pr create` succeeds. Needs `STATUS_WEBHOOK_SECRET` as a GitHub Actions repo secret
+   and the bot's public URL known to the workflow. `merged`/`deployed` reporting (a
+   PR-closed-and-merged workflow, a Railway deploy webhook) can follow once `pr_open` works.
 
 ## Known gaps / things to verify before going further
 
-- `pr-ai-review.yml` is **manually disabled** (`gh workflow disable "PR AI Review"`, at the
-  user's request) — the workflow file is unchanged and still in `.github/workflows/`, it's just
-  turned off at the repo level for now. Re-enable with `gh workflow enable "PR AI Review"` (or
-  Actions tab → PR AI Review → "Enable workflow") when it's wanted again. `feature-dev.yml` and
-  `ci.yml` are unaffected and still active.
 - The triage loop has not been exercised against a live Discord Forum Channel yet. Requires:
   a Forum Channel on the test server, its ID in `FEATURE_REQUEST_CHANNEL_ID`, and someone
   posting a thread while `npm run dev` is running.
-- The GitHub Actions pipeline has never run against a real approved feature request — see step
-  1 above (the PR-creation permission blocker) before attempting it.
+- The GitHub Actions pipeline has never run against a real approved feature request.
+- Nothing calls `POST /webhooks/status` yet — see PR #9 above and "Next up" step 2.
 - Local dev requires Docker Desktop running (`docker compose up -d`) before `npm run dev`
   will find a database.
+- **An unrelated uncommitted change was found sitting in the working tree while landing PR #9**:
+  `src/ai/triage.ts` had its model changed from `claude-opus-4-8` to
+  `claude-haiku-4-5-20251001` outside of any tracked commit, which fails
+  `triage.test.ts` (still asserts `claude-opus-4-8`). It was left as-is (not reverted, not
+  committed) since it wasn't part of this session's work and may be intentional in-progress
+  work — check `git diff main -- src/ai/triage.ts` locally and either commit it (updating the
+  test) or discard it.
 
 ## Environment / secrets status
 
 Already set in the user's local `.env` (test Discord app, not production):
 `DISCORD_BOT_TOKEN`, `DATABASE_URL`, `ANTHROPIC_API_KEY`, `APPROVER_DISCORD_USER_ID`,
-`FEATURE_REQUEST_CHANNEL_ID`, `GITHUB_TOKEN`, `GITHUB_REPO`.
+`FEATURE_REQUEST_CHANNEL_ID`, `GITHUB_TOKEN`, `GITHUB_REPO`, `STATUS_WEBHOOK_SECRET` (this last
+one generated locally this session — see PR #9 above).
 
 Set on GitHub (confirmed this session):
 
@@ -111,13 +129,15 @@ Set on GitHub (confirmed this session):
   separate from the local `.env` value, this is what `feature-dev.yml` and `pr-ai-review.yml`
   use.
 - Claude Code GitHub App installed on the repo.
+- "Allow GitHub Actions to create and approve pull requests" is on.
 
 Still needed:
 
-- Flip "Allow GitHub Actions to create and approve pull requests" on (see "Next up" step 1) —
-  confirmed still off as of this session.
-- For production: the production Discord bot token (application ID `966793705124151356`) and a
-  `DATABASE_URL` from Railway's Postgres add-on, both set directly in Railway's environment
-  variables — never copied into this repo or a local `.env`.
+- `STATUS_WEBHOOK_SECRET` as a GitHub Actions repo secret, and the bot's public URL known to
+  `feature-dev.yml` — both required before any workflow can call `POST /webhooks/status`.
+- For production: the production Discord bot token (application ID `966793705124151356`), a
+  `DATABASE_URL` from Railway's Postgres add-on, and a production `STATUS_WEBHOOK_SECRET` — all
+  set directly in Railway's environment variables, never copied into this repo or a local
+  `.env`.
 
 Railway is already connected to this GitHub repo and auto-deploys `main`.

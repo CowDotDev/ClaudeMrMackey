@@ -12,6 +12,7 @@ const REQUIRED_VARS = [
   'APPROVER_DISCORD_USER_ID',
   'GITHUB_TOKEN',
   'GITHUB_REPO',
+  'STATUS_WEBHOOK_SECRET',
 ] as const;
 
 describe('config', () => {
@@ -41,6 +42,7 @@ describe('config', () => {
     process.env.APPROVER_DISCORD_USER_ID = 'user-1';
     process.env.GITHUB_TOKEN = 'ghp_test';
     process.env.GITHUB_REPO = 'CowDotDev/ClaudeMrMackey';
+    process.env.STATUS_WEBHOOK_SECRET = 'test-webhook-secret';
 
     const { config } = await import('./config.js');
     expect(config.discordToken).toBe('test-token');
@@ -50,5 +52,6 @@ describe('config', () => {
     expect(config.approverDiscordUserId).toBe('user-1');
     expect(config.githubToken).toBe('ghp_test');
     expect(config.githubRepo).toBe('CowDotDev/ClaudeMrMackey');
+    expect(config.statusWebhookSecret).toBe('test-webhook-secret');
   });
 });

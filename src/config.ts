@@ -17,4 +17,5 @@ export const config = {
   approverDiscordUserId: requireEnv('APPROVER_DISCORD_USER_ID'),
   githubToken: requireEnv('GITHUB_TOKEN'),
   githubRepo: requireEnv('GITHUB_REPO'),
+  statusWebhookSecret: requireEnv('STATUS_WEBHOOK_SECRET'),
 };

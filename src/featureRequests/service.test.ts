@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { config } from '../config.js';
 import { prisma } from '../db/client.js';
-import { handleFeatureRequestMessage } from './service.js';
+import { applyStatusUpdate, handleFeatureRequestMessage } from './service.js';
 import type { TriageVerdict } from '../ai/triage.js';
 import type { DispatchFn } from '../github/dispatch.js';
 
@@ -221,5 +221,87 @@ describe('handleFeatureRequestMessage', () => {
       where: { discordThreadId: threadId },
     });
     expect(request.status).toBe('pending_approval');
+  });
+});
+
+describe('applyStatusUpdate', () => {
+  it('returns not_found for an unknown feature request id', async () => {
+    const result = await applyStatusUpdate({
+      featureRequestId: 'does-not-exist',
+      status: 'dev_in_progress',
+    });
+    expect(result).toEqual({ type: 'not_found' });
+  });
+
+  it('advances approved -> dev_in_progress and returns a notify result', async () => {
+    const request = await prisma.featureRequest.create({
+      data: { discordThreadId: threadId, guildId, opUserId, status: 'approved' },
+    });
+
+    const result = await applyStatusUpdate({
+      featureRequestId: request.id,
+      status: 'dev_in_progress',
+    });
+
+    expect(result).toEqual({
+      type: 'notify',
+      discordThreadId: threadId,
+      content: 'Development has started on this request.',
+    });
+
+    const updated = await prisma.featureRequest.findUniqueOrThrow({ where: { id: request.id } });
+    expect(updated.status).toBe('dev_in_progress');
+  });
+
+  it('records the PR number and links it on pr_open', async () => {
+    const request = await prisma.featureRequest.create({
+      data: { discordThreadId: threadId, guildId, opUserId, status: 'dev_in_progress' },
+    });
+
+    const result = await applyStatusUpdate({
+      featureRequestId: request.id,
+      status: 'pr_open',
+      prNumber: 42,
+    });
+
+    expect(result.type).toBe('notify');
+    if (result.type === 'notify') {
+      expect(result.content).toContain(`${config.githubRepo}/pull/42`);
+    }
+
+    const updated = await prisma.featureRequest.findUniqueOrThrow({ where: { id: request.id } });
+    expect(updated.status).toBe('pr_open');
+    expect(updated.githubPrNumber).toBe(42);
+  });
+
+  it('rejects a transition that skips a step', async () => {
+    const request = await prisma.featureRequest.create({
+      data: { discordThreadId: threadId, guildId, opUserId, status: 'approved' },
+    });
+
+    const result = await applyStatusUpdate({ featureRequestId: request.id, status: 'merged' });
+
+    expect(result).toEqual({ type: 'invalid_transition' });
+
+    const unchanged = await prisma.featureRequest.findUniqueOrThrow({ where: { id: request.id } });
+    expect(unchanged.status).toBe('approved');
+  });
+
+  it('records a bot event alongside the status change', async () => {
+    const request = await prisma.featureRequest.create({
+      data: { discordThreadId: threadId, guildId, opUserId, status: 'pr_open' },
+    });
+
+    await applyStatusUpdate({ featureRequestId: request.id, status: 'merged' });
+
+    const events = await prisma.featureRequestEvent.findMany({
+      where: { featureRequestId: request.id },
+    });
+    expect(events).toEqual([
+      expect.objectContaining({
+        author: 'bot',
+        content: 'The pull request has been merged into main.',
+      }),
+    ]);
   });
 });

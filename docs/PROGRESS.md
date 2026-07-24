@@ -76,8 +76,8 @@ all pass as of the last commit on `main`.
    doesn't need to change.)
 2. **Verify the pipeline live end-to-end**: post a feature request in the Discord Forum
    Channel, get it to `pending_approval`, comment `Approved`, and confirm a `repository_dispatch`
-   fires, `feature-dev.yml` runs and opens a PR, and `pr-ai-review.yml` leaves a review comment
-   on it. Fix whatever breaks — this has never run for real.
+   fires and `feature-dev.yml` runs and opens a PR. Fix whatever breaks — this has never run
+   for real. `pr-ai-review.yml` won't fire during this (see below) — that's expected for now.
 3. **Status webhook loop back into Discord (original task 8).** Add a POST route to the
    existing Fastify instance in `src/server.ts` that GitHub Actions / Railway can call to
    report PR-opened / merged / deployed events, and have it post back into the originating
@@ -86,6 +86,11 @@ all pass as of the last commit on `main`.
 
 ## Known gaps / things to verify before going further
 
+- `pr-ai-review.yml` is **manually disabled** (`gh workflow disable "PR AI Review"`, at the
+  user's request) — the workflow file is unchanged and still in `.github/workflows/`, it's just
+  turned off at the repo level for now. Re-enable with `gh workflow enable "PR AI Review"` (or
+  Actions tab → PR AI Review → "Enable workflow") when it's wanted again. `feature-dev.yml` and
+  `ci.yml` are unaffected and still active.
 - The triage loop has not been exercised against a live Discord Forum Channel yet. Requires:
   a Forum Channel on the test server, its ID in `FEATURE_REQUEST_CHANNEL_ID`, and someone
   posting a thread while `npm run dev` is running.

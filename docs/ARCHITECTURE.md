@@ -10,10 +10,15 @@ MrMackey is two cooperating subsystems, both living in this repo.
   summary, githubPrNumber, timestamps) and `FeatureRequestEvent` (audit log of OP/bot
   messages only — see [FEATURE_REQUEST_LIFECYCLE.md](./FEATURE_REQUEST_LIFECYCLE.md)).
 - **Triage**: on every new OP message in a tracked thread, ask Claude for a structured
-  `{ready, clarifyingQuestion?, summary?}` verdict. Messages from anyone other than the OP or
-  the configured approver are ignored entirely — not stored, not sent to Claude.
-- **Approval**: a message containing `Approved` from `APPROVER_DISCORD_USER_ID` (matched by
-  Discord user ID, never username) in a `pending_approval` thread triggers the dev pipeline.
+  `{ready, clarifyingQuestion?, summary?}` verdict. Once ready, the OP is asked to confirm the
+  generated summary or request changes — each requested change produces a revised summary and
+  asks again, looping until the OP explicitly confirms. Messages from anyone other than the OP
+  or the configured approver are ignored entirely — not stored, not sent to Claude.
+- **Approval**: once the OP confirms, a message containing `Approved` from
+  `APPROVER_DISCORD_USER_ID` (matched by Discord user ID, never username) in a
+  `pending_approval` thread triggers the dev pipeline. Any other approver message is treated as
+  a change request instead — it revises the summary and sends the request back to the OP to
+  reconfirm before `Approved` can trigger the pipeline again.
 - **Kickoff**: the bot calls GitHub's `repository_dispatch` API with the request summary.
 - **HTTP layer** (Fastify): `/health` for Railway, plus a webhook receiver so GitHub
   Actions/Railway can tell the bot to post status updates back into the originating thread.

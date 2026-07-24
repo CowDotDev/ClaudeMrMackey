@@ -1,9 +1,10 @@
 import { config } from '../config.js';
 import { prisma } from '../db/client.js';
-import type { TriageMessage, TriageVerdict } from '../ai/triage.js';
+import type { ConfirmationVerdict, TriageMessage, TriageVerdict } from '../ai/triage.js';
 import type { DispatchFn } from '../github/dispatch.js';
 
 export type TriageFn = (messages: TriageMessage[]) => Promise<TriageVerdict>;
+export type ConfirmFn = (summary: string, reply: string) => Promise<ConfirmationVerdict>;
 
 export type DevStatus = 'dev_in_progress' | 'pr_open' | 'merged' | 'deployed';
 
@@ -32,12 +33,13 @@ export type ServiceAction = { type: 'reply'; content: string } | { type: 'none' 
 export async function handleFeatureRequestMessage(
   message: IncomingMessage,
   triage: TriageFn,
+  confirm: ConfirmFn,
   dispatch: DispatchFn,
 ): Promise<ServiceAction> {
   if (message.isStarterMessage) {
     return createFeatureRequest(message, triage);
   }
-  return handleFollowUp(message, triage, dispatch);
+  return handleFollowUp(message, triage, confirm, dispatch);
 }
 
 async function createFeatureRequest(
@@ -61,6 +63,7 @@ async function createFeatureRequest(
 async function handleFollowUp(
   message: IncomingMessage,
   triage: TriageFn,
+  confirm: ConfirmFn,
   dispatch: DispatchFn,
 ): Promise<ServiceAction> {
   const request = await prisma.featureRequest.findUnique({
@@ -85,22 +88,66 @@ async function handleFollowUp(
     );
   }
 
+  if (request.status === 'confirming_summary') {
+    if (message.authorId !== request.opUserId) return { type: 'none' };
+
+    await prisma.featureRequestEvent.create({
+      data: { featureRequestId: request.id, author: 'op', content: message.content },
+    });
+
+    const verdict = await confirm(request.summary ?? '', message.content);
+
+    let content: string;
+    if (verdict.confirmed) {
+      content = `${verdict.updatedSummary}\n\nWaiting for <@${config.approverDiscordUserId}> to comment \`Approved\` in this thread to start development.`;
+      await prisma.featureRequest.update({
+        where: { id: request.id },
+        data: { status: 'pending_approval', summary: verdict.updatedSummary },
+      });
+    } else {
+      content = `${verdict.updatedSummary}\n\nDoes this look right, or is there anything else you'd like to add or change?`;
+      await prisma.featureRequest.update({
+        where: { id: request.id },
+        data: { summary: verdict.updatedSummary },
+      });
+    }
+
+    await prisma.featureRequestEvent.create({
+      data: { featureRequestId: request.id, author: 'bot', content },
+    });
+    return { type: 'reply', content };
+  }
+
   if (request.status === 'pending_approval') {
     if (message.authorId !== config.approverDiscordUserId) return { type: 'none' };
-    if (!/\bapproved\b/i.test(message.content)) return { type: 'none' };
 
-    await dispatch({
-      featureRequestId: request.id,
-      discordThreadId: request.discordThreadId,
-      summary: request.summary ?? '',
-    });
+    if (/\bapproved\b/i.test(message.content)) {
+      await dispatch({
+        featureRequestId: request.id,
+        discordThreadId: request.discordThreadId,
+        summary: request.summary ?? '',
+      });
 
+      await prisma.featureRequest.update({
+        where: { id: request.id },
+        data: { status: 'approved' },
+      });
+      const content =
+        "Approved. This has been queued for development - I'll post an update once a PR is open.";
+      await prisma.featureRequestEvent.create({
+        data: { featureRequestId: request.id, author: 'bot', content },
+      });
+      return { type: 'reply', content };
+    }
+
+    // Not an approval - treat it as a requested change and send it back to the OP to
+    // reconfirm before the approver can approve it again.
+    const verdict = await confirm(request.summary ?? '', message.content);
+    const content = `<@${request.opUserId}> the approver requested a change: "${message.content}"\n\n${verdict.updatedSummary}\n\nDoes this look right, or is there anything else you'd like to add or change?`;
     await prisma.featureRequest.update({
       where: { id: request.id },
-      data: { status: 'approved' },
+      data: { status: 'confirming_summary', summary: verdict.updatedSummary },
     });
-    const content =
-      "Approved. This has been queued for development - I'll post an update once a PR is open.";
     await prisma.featureRequestEvent.create({
       data: { featureRequestId: request.id, author: 'bot', content },
     });
@@ -119,10 +166,10 @@ async function runTriageAndRespond(
 
   let content: string;
   if (verdict.ready) {
-    content = `${verdict.summary}\n\nWaiting for <@${config.approverDiscordUserId}> to comment \`Approved\` in this thread to start development.`;
+    content = `${verdict.summary}\n\nDoes this look right, or is there anything you'd like to add or change?`;
     await prisma.featureRequest.update({
       where: { id: requestId },
-      data: { status: 'pending_approval', summary: verdict.summary },
+      data: { status: 'confirming_summary', summary: verdict.summary },
     });
   } else {
     content = verdict.clarifyingQuestion ?? 'Could you share more detail about this request?';

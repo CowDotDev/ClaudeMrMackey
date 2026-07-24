@@ -1,7 +1,7 @@
 import { Client, Events } from 'discord.js';
 
 import { config } from '../config.js';
-import { triageFeatureRequest } from '../ai/triage.js';
+import { confirmFeatureRequestSummary, triageFeatureRequest } from '../ai/triage.js';
 import { dispatchFeatureRequest } from '../github/dispatch.js';
 import { handleFeatureRequestMessage } from '../featureRequests/service.js';
 
@@ -21,6 +21,7 @@ export function registerFeatureRequestHandlers(client: Client): void {
           isStarterMessage: message.id === message.channel.id,
         },
         triageFeatureRequest,
+        confirmFeatureRequestSummary,
         dispatchFeatureRequest,
       );
 

@@ -45,5 +45,10 @@
     "typescript": "^5.7.3",
     "typescript-eslint": "^8.20.0",
     "vitest": "^3.0.4"
+  },
+  "allowScripts": {
+    "@prisma/engines@7.9.0": true,
+    "esbuild@0.28.1": true,
+    "prisma@7.9.0": true
   }
 }

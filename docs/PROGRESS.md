@@ -64,57 +64,74 @@ and you should have everything needed to continue without re-deriving context.
   unchanged, just turned off at the repo level. Re-enable with
   `gh workflow enable "PR AI Review"` when it's wanted again. `feature-dev.yml` and `ci.yml`
   are unaffected.
-- **PR #9 (branch `feature/status-webhook`, not yet opened)** — the status-webhook loop back
-  into Discord (original task 8): `applyStatusUpdate()` in `src/featureRequests/service.ts` is
-  a small state machine (`approved → dev_in_progress → pr_open → merged → deployed`, see
+- **The pipeline has run live end-to-end for the first time**: a real Discord approval (via the
+  local `npm run dev` bot) fired `repository_dispatch`, and `feature-dev.yml` implemented and
+  opened **PR [#11](https://github.com/CowDotDev/ClaudeMrMackey/pull/11) "Add /roll dice
+  command"** (`src/commands/roll.ts` + `src/discord/commands.ts`, 13 new tests) — merged. No
+  Discord thread update happened when the PR was opened — expected at the time, since nothing
+  called `POST /webhooks/status` yet (see below). Separately, a small manual commit landed
+  directly on `main` (`67f02d3`, "Quick manual additions"): `package.json`'s `allowScripts` for
+  the Prisma/esbuild install-script warning, and dropped `effort: 'low'` from
+  `triage.ts`'s `output_config` (unsupported alongside `claude-haiku-4-5`, presumably).
+- **PR [#9](https://github.com/CowDotDev/ClaudeMrMackey/pull/9)** — the status-webhook loop
+  back into Discord (original task 8): `applyStatusUpdate()` in
+  `src/featureRequests/service.ts` is a small state machine
+  (`approved → dev_in_progress → pr_open → merged → deployed`, see
   `docs/FEATURE_REQUEST_LIFECYCLE.md`) that only accepts the one valid next status, updates the
   `FeatureRequest` row (recording `githubPrNumber` on `pr_open`), and logs a `bot`
-  `FeatureRequestEvent`. `POST /webhooks/status` in `src/server.ts` is the new authenticated
-  (`Authorization: Bearer <STATUS_WEBHOOK_SECRET>`) Fastify route GitHub Actions/Railway will
-  call, which then uses `src/discord/notify.ts` (`createDiscordNotifier`, a thin wrapper around
-  `client.channels.fetch` + `.send`) to post the update into the originating thread.
-  `STATUS_WEBHOOK_SECRET` is now required config; a value was generated and added to the local
-  `.env` this session (it's an arbitrary shared secret, not an external credential, so safe to
-  generate locally rather than needing to come from the user).
+  `FeatureRequestEvent`. `POST /webhooks/status` in `src/server.ts` is the authenticated
+  (`Authorization: Bearer <STATUS_WEBHOOK_SECRET>`) Fastify route GitHub Actions/Railway call,
+  which then uses `src/discord/notify.ts` (`createDiscordNotifier`) to post into the
+  originating thread. `STATUS_WEBHOOK_SECRET` is now required config; a value was generated and
+  added to the local `.env` this session (it's an arbitrary shared secret, not an external
+  credential, so safe to generate locally).
+- **PR [#10](https://github.com/CowDotDev/ClaudeMrMackey/pull/10)** — kept an unrelated
+  uncommitted change found in the working tree while landing PR #9 (switched
+  `triageFeatureRequest()`'s model from `claude-opus-4-8` to `claude-haiku-4-5-20251001`, per
+  instruction) and updated `triage.test.ts` to match, on its own branch since it was unrelated
+  to PR #9.
+- **PR #12 (branch `feature/report-status-webhook-calls`, not yet opened)** —
+  `feature-dev.yml` now calls `POST /webhooks/status`: a "Report dev_in_progress status" step
+  right after the branch is created, and a "Look up the opened PR" + "Report pr_open status"
+  pair right after Claude's step, using `gh pr list --head <branch>` to find the PR number
+  rather than trusting Claude to report it. Both report steps are gated on
+  `vars.BOT_PUBLIC_URL != ''` and use `continue-on-error: true`, so until that repo variable is
+  set they're a no-op (not a failure), and even once set, a webhook hiccup won't fail an
+  otherwise-successful run. Deliberately **not** given to Claude as a `curl` tool — the
+  PR-creation step runs with content derived from an untrusted Discord request, and handing it
+  a general-purpose HTTP tool alongside `STATUS_WEBHOOK_SECRET` would be a
+  prompt-injection/exfiltration risk per CLAUDE.md's untrusted-input rule. `merged`/`deployed`
+  reporting (a PR-closed-and-merged workflow, a Railway deploy webhook) is still unwired.
 
-  **What this PR does _not_ do**: nothing calls this endpoint yet. `feature-dev.yml` doesn't
-  `curl` it after `gh pr create`, there's no workflow reporting `merged` on PR close, and
-  Railway isn't configured to call it on deploy. Wiring those emitters is separate follow-up
-  work (needs the bot's public Railway URL as a new `BOT_PUBLIC_URL`-style value plus
-  `STATUS_WEBHOOK_SECRET` set as both a GitHub Actions secret and a Railway env var — neither
-  is set anywhere outside the local `.env` yet).
-
-Local main is in sync with PRs #1-#3, #5, and #6. `npm run build/lint/format:check/typecheck/test`
+Local main is in sync with PRs #1-#3, #5, #6, and #9-#11. `npm run build/lint/format:check/typecheck/test`
 all pass as of the last commit on `main`.
 
 ## Next up (in order)
 
-1. **Verify the pipeline live end-to-end**: post a feature request in the Discord Forum
-   Channel, get it to `pending_approval`, comment `Approved`, and confirm a `repository_dispatch`
-   fires and `feature-dev.yml` runs and opens a PR. Fix whatever breaks — this has never run
-   for real. `pr-ai-review.yml` won't fire during this (it's disabled, see above) — expected.
-2. **Wire something to actually call `POST /webhooks/status`** now that PR #9 exists: at
-   minimum, have `feature-dev.yml` `curl` it with `status: pr_open` and the PR number right
-   after `gh pr create` succeeds. Needs `STATUS_WEBHOOK_SECRET` as a GitHub Actions repo secret
-   and the bot's public URL known to the workflow. `merged`/`deployed` reporting (a
-   PR-closed-and-merged workflow, a Railway deploy webhook) can follow once `pr_open` works.
+1. **Deploy the bot to Railway and get its public URL.** Needed for anything below to matter —
+   without a reachable bot instance, `feature-dev.yml`'s status-report steps stay permanently
+   skipped. Requires the production secrets listed under "Still needed" below.
+2. **Set `BOT_PUBLIC_URL` as a GitHub Actions repo _variable_** (Settings → Secrets and
+   variables → Actions → Variables tab, not Secrets — it's not sensitive) to the Railway URL
+   from step 1, **and** `STATUS_WEBHOOK_SECRET` as a GitHub Actions repo _secret_ matching
+   whatever value Railway has for it. This turns on the `dev_in_progress`/`pr_open` reporting
+   already wired in `feature-dev.yml`.
+3. **Verify live**: approve a feature request, confirm the thread gets a "Development has
+   started..." message and then a PR link, matching `applyStatusUpdate()`'s messages in
+   `src/featureRequests/service.ts`.
+4. **Wire `merged`/`deployed` reporting**: a new workflow (or an addition to `pr-ai-review.yml`
+   if it gets re-enabled) triggered on `pull_request: closed` with `merged == true` to report
+   `status: merged`; a Railway deploy webhook (or a small polling/webhook mechanism) to report
+   `status: deployed`. Neither exists yet.
 
 ## Known gaps / things to verify before going further
 
-- The triage loop has not been exercised against a live Discord Forum Channel yet. Requires:
-  a Forum Channel on the test server, its ID in `FEATURE_REQUEST_CHANNEL_ID`, and someone
-  posting a thread while `npm run dev` is running.
-- The GitHub Actions pipeline has never run against a real approved feature request.
-- Nothing calls `POST /webhooks/status` yet — see PR #9 above and "Next up" step 2.
+- The triage loop has not been exercised against a live Discord Forum Channel yet in the sense
+  of `gathering_info` → clarifying questions — the one live run so far went straight through
+  from an already-complete request. Worth confirming the clarifying-question loop separately.
+- Nothing calls `POST /webhooks/status` in production yet — see "Next up" steps 1-3.
 - Local dev requires Docker Desktop running (`docker compose up -d`) before `npm run dev`
   will find a database.
-- **An unrelated uncommitted change was found sitting in the working tree while landing PR #9**:
-  `src/ai/triage.ts` had its model changed from `claude-opus-4-8` to
-  `claude-haiku-4-5-20251001` outside of any tracked commit, which fails
-  `triage.test.ts` (still asserts `claude-opus-4-8`). It was left as-is (not reverted, not
-  committed) since it wasn't part of this session's work and may be intentional in-progress
-  work — check `git diff main -- src/ai/triage.ts` locally and either commit it (updating the
-  test) or discard it.
 
 ## Environment / secrets status
 
@@ -131,13 +148,16 @@ Set on GitHub (confirmed this session):
 - Claude Code GitHub App installed on the repo.
 - "Allow GitHub Actions to create and approve pull requests" is on.
 
-Still needed:
+Still needed (see "Next up" above):
 
-- `STATUS_WEBHOOK_SECRET` as a GitHub Actions repo secret, and the bot's public URL known to
-  `feature-dev.yml` — both required before any workflow can call `POST /webhooks/status`.
+- The bot deployed to Railway with a public URL — nothing has been deployed there yet as far as
+  this session could tell.
+- `BOT_PUBLIC_URL` as a GitHub Actions repo **variable** (not secret) and `STATUS_WEBHOOK_SECRET`
+  as a GitHub Actions repo **secret**, once the URL exists.
 - For production: the production Discord bot token (application ID `966793705124151356`), a
   `DATABASE_URL` from Railway's Postgres add-on, and a production `STATUS_WEBHOOK_SECRET` — all
   set directly in Railway's environment variables, never copied into this repo or a local
-  `.env`.
+  `.env`. The Railway `STATUS_WEBHOOK_SECRET` value and the GitHub Actions secret of the same
+  name (above) must match — that's how `feature-dev.yml` authenticates to the deployed bot.
 
 Railway is already connected to this GitHub repo and auto-deploys `main`.

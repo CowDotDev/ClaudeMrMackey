@@ -30,8 +30,8 @@ and you should have everything needed to continue without re-deriving context.
   the future status-webhook (step 3 below) should use to find its way back to the right thread.
   **Only unit tested (mocked Octokit client)** at the time it was written — merged as PR
   [#5](https://github.com/CowDotDev/ClaudeMrMackey/pull/5).
-- **PR #6 (branch `feature/github-actions-pipeline`, not yet opened)** — the three GitHub
-  Actions workflows this repo's whole pipeline depends on, all under `.github/workflows/`:
+- **PR [#6](https://github.com/CowDotDev/ClaudeMrMackey/pull/6)** — the three GitHub Actions
+  workflows this repo's whole pipeline depends on, all under `.github/workflows/`:
   - `feature-dev.yml` — triggers on the `feature-request-approved` `repository_dispatch` event
     fired by `dispatchFeatureRequest()`. Checks out `main`, creates a deterministic
     `feature-request/<featureRequestId>` branch, then runs `anthropics/claude-code-action@v1`
@@ -49,33 +49,36 @@ and you should have everything needed to continue without re-deriving context.
     PRs #2, #3, and #5 (`npm test` needs a reachable `DATABASE_URL` and nothing enforced that
     in CI until now).
 
-  **Not yet verified end-to-end against the real repo.** Specifically unverified:
-  - No `ANTHROPIC_API_KEY` GitHub Actions secret exists yet in this repo — both
-    `feature-dev.yml` and `pr-ai-review.yml` will fail at the `claude-code-action` step until
-    one is added (repo Settings → Secrets and variables → Actions).
-  - `feature-dev.yml` has never actually run — untested whether the prompt/`allowedTools` scope
-    is sufficient for Claude to reliably get through implement → test → `gh pr create`, or
-    whether the default `GITHUB_TOKEN` has enough permission for `gh pr create` to succeed
-    (repo Settings → Actions → General → Workflow permissions must allow "Read and write
-    permissions" and PR creation by Actions).
-  - No live test of the full loop: Discord approval → dispatch → `feature-dev.yml` → PR →
-    `pr-ai-review.yml` → human merge → Railway deploy.
+  Two things got fixed live against the real repo while landing this PR:
+  - `pr-ai-review.yml` was missing `id-token: write` in its `permissions:` block —
+    `claude-code-action` needs it for the Claude Code GitHub App's token exchange regardless of
+    which workflow calls it. `feature-dev.yml` already had it; ported the fix over (small
+    follow-up commit on the same PR, not a separate one).
+  - The [Claude Code GitHub App](https://github.com/apps/claude) had to be installed on the
+    repo — the action doesn't work from workflow YAML alone. **Done**, confirmed by
+    `pr-ai-review.yml` passing on PR #6 after install.
 
-Local main is in sync with PRs #1-#3 and #5. `npm run build/lint/format:check/typecheck/test`
-all pass as of the last commit on `main`; the same gates pass on `feature/github-actions-pipeline`.
+Local main is in sync with PRs #1-#3, #5, and #6. `npm run build/lint/format:check/typecheck/test`
+all pass as of the last commit on `main`.
 
 ## Next up (in order)
 
-1. **Open the PR for `feature/github-actions-pipeline`** (this session's work, described above)
-   and get it merged.
-2. **Add the `ANTHROPIC_API_KEY` repo secret** (Settings → Secrets and variables → Actions) and
-   confirm Actions workflow permissions allow PR creation — both are required before
-   `feature-dev.yml` can do anything.
-3. **Verify the pipeline live end-to-end**: post a feature request in the Discord Forum
+1. **Enable Actions PR creation before triggering `feature-dev.yml` for real.**
+   `gh api repos/CowDotDev/ClaudeMrMackey/actions/permissions/workflow` currently returns
+   `can_approve_pull_request_reviews: false` — this is the "Allow GitHub Actions to create and
+   approve pull requests" checkbox under repo Settings → Actions → General → Workflow
+   permissions, and it's a hard governor independent of the `permissions:` block a workflow
+   declares. With it off, `feature-dev.yml`'s `gh pr create` step will fail even though the
+   workflow itself requests `pull-requests: write`. This is a repo security setting, so it
+   needs a human to flip it deliberately rather than an agent doing it automatically. (The
+   same check also shows `default_workflow_permissions: read`, but that only matters for
+   workflows that omit an explicit `permissions:` block — all three of ours declare one, so it
+   doesn't need to change.)
+2. **Verify the pipeline live end-to-end**: post a feature request in the Discord Forum
    Channel, get it to `pending_approval`, comment `Approved`, and confirm a `repository_dispatch`
    fires, `feature-dev.yml` runs and opens a PR, and `pr-ai-review.yml` leaves a review comment
    on it. Fix whatever breaks — this has never run for real.
-4. **Status webhook loop back into Discord (original task 8).** Add a POST route to the
+3. **Status webhook loop back into Discord (original task 8).** Add a POST route to the
    existing Fastify instance in `src/server.ts` that GitHub Actions / Railway can call to
    report PR-opened / merged / deployed events, and have it post back into the originating
    Discord thread (look up by `FeatureRequest.githubPrNumber` or the `featureRequestId`
@@ -86,8 +89,8 @@ all pass as of the last commit on `main`; the same gates pass on `feature/github
 - The triage loop has not been exercised against a live Discord Forum Channel yet. Requires:
   a Forum Channel on the test server, its ID in `FEATURE_REQUEST_CHANNEL_ID`, and someone
   posting a thread while `npm run dev` is running.
-- The GitHub Actions pipeline (`feature-dev.yml`, `pr-ai-review.yml`, `ci.yml`) has never run
-  against the real repo — see the unverified list under PR #6 above.
+- The GitHub Actions pipeline has never run against a real approved feature request — see step
+  1 above (the PR-creation permission blocker) before attempting it.
 - Local dev requires Docker Desktop running (`docker compose up -d`) before `npm run dev`
   will find a database.
 
@@ -97,11 +100,17 @@ Already set in the user's local `.env` (test Discord app, not production):
 `DISCORD_BOT_TOKEN`, `DATABASE_URL`, `ANTHROPIC_API_KEY`, `APPROVER_DISCORD_USER_ID`,
 `FEATURE_REQUEST_CHANNEL_ID`, `GITHUB_TOKEN`, `GITHUB_REPO`.
 
+Set on GitHub (confirmed this session):
+
+- `ANTHROPIC_API_KEY` GitHub Actions repo secret (Settings → Secrets and variables → Actions) —
+  separate from the local `.env` value, this is what `feature-dev.yml` and `pr-ai-review.yml`
+  use.
+- Claude Code GitHub App installed on the repo.
+
 Still needed:
 
-- An `ANTHROPIC_API_KEY` GitHub Actions **repo secret** (Settings → Secrets and variables →
-  Actions) — separate from the local `.env` value, this is what `feature-dev.yml` and
-  `pr-ai-review.yml` use. Not set yet as of this session.
+- Flip "Allow GitHub Actions to create and approve pull requests" on (see "Next up" step 1) —
+  confirmed still off as of this session.
 - For production: the production Discord bot token (application ID `966793705124151356`) and a
   `DATABASE_URL` from Railway's Postgres add-on, both set directly in Railway's environment
   variables — never copied into this repo or a local `.env`.

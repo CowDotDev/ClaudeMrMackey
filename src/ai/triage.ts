@@ -48,7 +48,6 @@ export async function triageFeatureRequest(
     model: 'claude-haiku-4-5-20251001',
     max_tokens: 1024,
     output_config: {
-      effort: 'low',
       format: zodOutputFormat(TriageVerdictSchema),
     },
     system: SYSTEM_PROMPT,

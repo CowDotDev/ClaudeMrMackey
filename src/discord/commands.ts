@@ -2,10 +2,16 @@ import { Client, Events } from 'discord.js';
 
 import { coinflipCommand, handleCoinFlip } from '../commands/coinflip.js';
 import { handleRoll, rollCommand } from '../commands/roll.js';
+import { onCommand, removeCustomCommand } from './customCommands.js';
 
 export function registerCommandHandlers(client: Client): void {
   client.once(Events.ClientReady, async (readyClient) => {
-    await readyClient.application.commands.set([rollCommand.toJSON(), coinflipCommand.toJSON()]);
+    await readyClient.application.commands.set([
+      rollCommand.toJSON(),
+      coinflipCommand.toJSON(),
+      onCommand.toJSON(),
+      removeCustomCommand.toJSON(),
+    ]);
   });
 
   client.on(Events.InteractionCreate, async (interaction) => {

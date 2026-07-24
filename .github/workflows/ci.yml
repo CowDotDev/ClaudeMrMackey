@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: mrmackey
+          POSTGRES_PASSWORD: mrmackey
+          POSTGRES_DB: mrmackey
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://mrmackey:mrmackey@localhost:5432/mrmackey
+      DISCORD_BOT_TOKEN: test-token
+      ANTHROPIC_API_KEY: sk-ant-test
+      APPROVER_DISCORD_USER_ID: test-approver
+      FEATURE_REQUEST_CHANNEL_ID: test-channel
+      GITHUB_TOKEN: ghp_test
+      GITHUB_REPO: CowDotDev/ClaudeMrMackey
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Apply database migrations
+        run: npx prisma migrate deploy
+
+      - name: Build
+        run: npm run build
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
